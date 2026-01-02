@@ -230,90 +230,145 @@ function UserCard({ user, onApprove, onReject, showActions = true }) {
   };
 
   const badge = getRoleBadge(user.role);
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
 
   return (
-    <div className="border rounded-lg p-6 hover:shadow-md transition-shadow">
-      <div className="flex items-start justify-between">
+    <div className="border-2 border-gray-200 rounded-xl p-6 hover:shadow-lg transition-all bg-white">
+      {/* Header with Role and Status */}
+      <div className="flex items-start justify-between mb-6 pb-4 border-b-2 border-gray-100">
         <div className="flex-1">
-          <div className="flex items-center gap-3 mb-3">
-            <h3 className="text-lg font-semibold text-gray-900">{user.name}</h3>
-            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${badge.color}`}>
-              {badge.icon} {user.role}
-            </span>
-            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusBadge(user.status)}`}>
-              {user.status}
+          <div className="flex items-center gap-3 mb-2">
+            <h3 className="text-2xl font-bold text-gray-900">{user.name}</h3>
+            <span className={`px-4 py-1.5 rounded-full text-sm font-bold ${badge.color}`}>
+              {badge.icon} {user.role.toUpperCase()}
             </span>
           </div>
-          
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span className="text-gray-500">Email:</span>
-              <p className="text-gray-900">{user.email}</p>
-            </div>
-            {user.organization && (
-              <div>
-                <span className="text-gray-500">Organization:</span>
-                <p className="text-gray-900">{user.organization}</p>
-              </div>
-            )}
-            <div className="col-span-2">
-              <span className="text-gray-500">Wallet:</span>
-              <p className="text-gray-900 font-mono text-xs">{user.id || user.walletAddress}</p>
-            </div>
-            {user.description && (
-              <div className="col-span-2">
-                <span className="text-gray-500">Description:</span>
-                <p className="text-gray-900">{user.description}</p>
-              </div>
-            )}
-            {user.documentUrl && (
-              <div className="col-span-2">
-                <span className="text-gray-500">Verification Document:</span>
-                <a
-                  href={user.documentUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-800 font-semibold"
-                >
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-                  </svg>
-                  View Document (PDF)
-                </a>
-              </div>
-            )}
+          <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${getStatusBadge(user.status)}`}>
+            Status: {user.status.toUpperCase()}
+          </span>
+        </div>
+      </div>
+
+      {/* Application Details */}
+      <div className="bg-gray-50 rounded-lg p-5 mb-4">
+        <h4 className="font-bold text-gray-900 mb-3 text-lg flex items-center gap-2">
+          <svg className="w-5 h-5 text-indigo-600" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
+            <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd"/>
+          </svg>
+          Application Details
+        </h4>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Email */}
+          <div className="bg-white rounded-lg p-3 border border-gray-200">
+            <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Email Address</span>
+            <p className="text-gray-900 font-medium">{user.email}</p>
           </div>
+
+          {/* Organization */}
+          {user.organization && (
+            <div className="bg-white rounded-lg p-3 border border-gray-200">
+              <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Organization</span>
+              <p className="text-gray-900 font-medium">{user.organization}</p>
+            </div>
+          )}
+
+          {/* Application Date */}
+          <div className="bg-white rounded-lg p-3 border border-gray-200">
+            <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Applied On</span>
+            <p className="text-gray-900 font-medium">{formatDate(user.createdAt)}</p>
+          </div>
+
+          {/* Last Updated */}
+          {user.updatedAt && (
+            <div className="bg-white rounded-lg p-3 border border-gray-200">
+              <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Last Updated</span>
+              <p className="text-gray-900 font-medium">{formatDate(user.updatedAt)}</p>
+            </div>
+          )}
         </div>
 
-        {showActions && user.status === USER_STATUS.PENDING && (
-          <div className="flex flex-col gap-2 ml-4">
-            {user.documentUrl && (
+        {/* Wallet Address */}
+        <div className="bg-white rounded-lg p-3 border border-gray-200 mt-4">
+          <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Stellar Wallet Address</span>
+          <p className="text-gray-900 font-mono text-sm break-all">{user.id || user.walletAddress}</p>
+        </div>
+
+        {/* Description/Reason */}
+        {user.description && (
+          <div className="bg-white rounded-lg p-4 border border-gray-200 mt-4">
+            <span className="text-xs font-semibold text-gray-500 uppercase block mb-2">
+              Why They Need This Role
+            </span>
+            <p className="text-gray-900 leading-relaxed">{user.description}</p>
+          </div>
+        )}
+
+        {/* Verification Document */}
+        {user.documentUrl && (
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-200 mt-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="bg-blue-500 text-white rounded-lg p-3">
+                  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div>
+                  <span className="text-xs font-semibold text-blue-700 uppercase block">Verification Document</span>
+                  <p className="text-sm text-blue-900 font-medium">PDF Document Uploaded</p>
+                </div>
+              </div>
               <a
                 href={user.documentUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-semibold text-center"
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-bold transition-all shadow-md hover:shadow-lg flex items-center gap-2"
               >
-                📄 View Document
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+                VIEW DOCUMENT
               </a>
-            )}
-            <div className="flex gap-2">
-            <button
-              onClick={() => onApprove(user.id)}
-              className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-semibold"
-            >
-              ✓ Approve
-            </button>
-            <button
-              onClick={() => onReject(user.id)}
-              className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-semibold"
-            >
-              ✗ Reject
-            </button>
             </div>
           </div>
         )}
       </div>
+
+      {/* Action Buttons */}
+      {showActions && user.status === USER_STATUS.PENDING && (
+        <div className="flex gap-3 pt-4 border-t-2 border-gray-100">
+          <button
+            onClick={() => onApprove(user.id)}
+            className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white py-4 rounded-lg font-bold text-lg transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+          >
+            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            APPROVE APPLICATION
+          </button>
+          <button
+            onClick={() => onReject(user.id)}
+            className="flex-1 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white py-4 rounded-lg font-bold text-lg transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+          >
+            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            REJECT APPLICATION
+          </button>
+        </div>
+      )}
     </div>
   );
 }
