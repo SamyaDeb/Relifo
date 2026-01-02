@@ -266,11 +266,38 @@ function UserCard({ user, onApprove, onReject, showActions = true }) {
                 <p className="text-gray-900">{user.description}</p>
               </div>
             )}
+            {user.documentUrl && (
+              <div className="col-span-2">
+                <span className="text-gray-500">Verification Document:</span>
+                <a
+                  href={user.documentUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-800 font-semibold"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                  </svg>
+                  View Document (PDF)
+                </a>
+              </div>
+            )}
           </div>
         </div>
 
         {showActions && user.status === USER_STATUS.PENDING && (
-          <div className="flex gap-2 ml-4">
+          <div className="flex flex-col gap-2 ml-4">
+            {user.documentUrl && (
+              <a
+                href={user.documentUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-semibold text-center"
+              >
+                📄 View Document
+              </a>
+            )}
+            <div className="flex gap-2">
             <button
               onClick={() => onApprove(user.id)}
               className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-semibold"
@@ -283,6 +310,7 @@ function UserCard({ user, onApprove, onReject, showActions = true }) {
             >
               ✗ Reject
             </button>
+            </div>
           </div>
         )}
       </div>

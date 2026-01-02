@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { db } from '../firebase/config';
+import { db, storage } from '../firebase/config';
 import { doc, setDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { ROLES, USER_STATUS } from '../firebase/constants';
 import { freighterService } from '../services/freighterService';
 
@@ -13,9 +14,10 @@ export default function Register() {
     name: '',
     email: '',
     organization: '',
-    description: '',
-    documentUrl: ''
+    description: ''
   });
+  const [documentFile, setDocumentFile] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   const roles = [
     {
@@ -78,6 +80,19 @@ export default function Register() {
         return;
       }
 
+      // Upload document if provided
+      let documentUrl = null;
+      if (documentFile && storage) {
+        try {
+          const fileRef = ref(storage, `verification-documents/${publicKey}/${documentFile.name}`);
+          await uploadBytes(fileRef, documentFile);
+          documentUrl = await getDownloadURL(fileRef);
+        } catch (uploadError) {
+          console.error('Document upload failed:', uploadError);
+          alert('Warning: Document upload failed, but registration will continue.');
+        }
+      }
+
       // Build role-specific profile
       const roleProfile = { ...baseProfile };
 
@@ -87,13 +102,13 @@ export default function Register() {
       } else if (selectedRole === ROLES.ORGANIZER) {
         roleProfile.organization = formData.organization;
         roleProfile.description = formData.description;
-        roleProfile.documentUrl = formData.documentUrl || null;
+        roleProfile.documentUrl = documentUrl;
         roleProfile.campaignsCreated = 0;
         roleProfile.totalRaised = 0;
       } else if (selectedRole === ROLES.BENEFICIARY) {
         roleProfile.organization = formData.organization || null;
         roleProfile.description = formData.description;
-        roleProfile.documentUrl = formData.documentUrl || null;
+        roleProfile.documentUrl = documentUrl;
         roleProfile.allocatedFunds = 0;
         roleProfile.spentFunds = 0;
         roleProfile.linkedCampaign = null;
@@ -270,21 +285,30 @@ export default function Register() {
                 </div>
               )}
 
-              {/* Document URL (for Organizer/Beneficiary) */}
+              {/* Document Upload (for Organizer/Beneficiary) */}
               {!selectedRoleData.autoApprove && (
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Verification Document URL (Optional)
+                    Verification Document (PDF) - Optional
                   </label>
-                  <input
-                    type="url"
-                    value={formData.documentUrl}
-                    onChange={(e) => setFormData({ ...formData, documentUrl: e.target.value })}
-                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
-                    placeholder="https://drive.google.com/..."
-                  />
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 hover:border-indigo-500 transition-colors">
+                    <input
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      onChange={(e) => setDocumentFile(e.target.files[0])}
+                      className="w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                    />
+                    {documentFile && (
+                      <div className="mt-2 flex items-center gap-2 text-sm text-green-600">
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                        {documentFile.name} ({(documentFile.size / 1024).toFixed(2)} KB)
+                      </div>
+                    )}
+                  </div>
                   <p className="text-sm text-gray-500 mt-1">
-                    Upload ID proof, organization certificate, or disaster proof document
+                    Upload ID proof, organization certificate, or disaster proof document (PDF only)
                   </p>
                 </div>
               )}
