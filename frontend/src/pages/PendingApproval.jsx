@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase/config';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { freighterService } from '../services/freighterService';
-import { USER_STATUS } from '../firebase/constants';
+import { USER_STATUS, ROLES } from '../firebase/constants';
 
 export default function PendingApproval() {
   const navigate = useNavigate();
   const [userData, setUserData] = useState(null);
+  const [campaign, setCampaign] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -19,10 +20,18 @@ export default function PendingApproval() {
         
         if (db) {
           // Real-time listener for approval status
-          unsubscribe = onSnapshot(doc(db, 'users', publicKey), (doc) => {
+          unsubscribe = onSnapshot(doc(db, 'users', publicKey), async (doc) => {
             if (doc.exists()) {
               const data = doc.data();
               setUserData(data);
+              
+              // Load campaign info if beneficiary
+              if (data.role === ROLES.BENEFICIARY && data.campaignId) {
+                const campaignDoc = await getDoc(doc(db, 'campaigns', data.campaignId));
+                if (campaignDoc.exists()) {
+                  setCampaign(campaignDoc.data());
+                }
+              }
               
               // If approved, redirect to dashboard
               if (data.status === USER_STATUS.APPROVED) {
@@ -117,6 +126,12 @@ export default function PendingApproval() {
                     <span className="font-semibold text-gray-900">{userData.organization}</span>
                   </div>
                 )}
+                {userData.role === ROLES.BENEFICIARY && campaign && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Campaign:</span>
+                    <span className="font-semibold text-gray-900">{campaign.title}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -138,7 +153,9 @@ export default function PendingApproval() {
                   ⏳ Step 2: Under Review
                 </h4>
                 <p className="text-gray-600 text-sm">
-                  Our admin team is currently reviewing your application
+                  {userData?.role === ROLES.BENEFICIARY 
+                    ? 'The campaign organizer is reviewing your application'
+                    : 'Our admin team is currently reviewing your application'}
                 </p>
               </div>
               <div>
@@ -158,7 +175,9 @@ export default function PendingApproval() {
                 <div>
                   <h4 className="font-semibold text-blue-900 mb-1">What happens next?</h4>
                   <ul className="text-sm text-blue-800 space-y-1">
-                    <li>• Our admin team will review your application within 24-48 hours</li>
+                    <li>• {userData?.role === ROLES.BENEFICIARY 
+                      ? 'The campaign organizer will review your application within 24-48 hours'
+                      : 'Our admin team will review your application within 24-48 hours'}</li>
                     <li>• You'll receive an email notification about the decision</li>
                     <li>• This page will automatically update when approved</li>
                     <li>• You can close this page and come back anytime</li>

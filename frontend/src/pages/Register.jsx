@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db, storage } from '../firebase/config';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { ROLES, USER_STATUS } from '../firebase/constants';
 import { freighterService } from '../services/freighterService';
@@ -14,10 +14,12 @@ export default function Register() {
     name: '',
     email: '',
     organization: '',
-    description: ''
+    description: '',
+    campaignId: ''
   });
   const [documentFile, setDocumentFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [campaigns, setCampaigns] = useState([]);
 
   const roles = [
     {
@@ -34,6 +36,7 @@ export default function Register() {
       icon: '🏢',
       description: 'Create and manage disaster relief campaigns',
       autoApprove: false,
+      approvedBy: 'admin',
       color: 'from-blue-500 to-indigo-600'
     },
     {
@@ -42,9 +45,22 @@ export default function Register() {
       icon: '🤝',
       description: 'Receive relief funds for disaster recovery',
       autoApprove: false,
+      approvedBy: 'organizer',
       color: 'from-purple-500 to-pink-600'
     }
   ];
+
+  // Load active campaigns when beneficiary role is selected
+  useEffect(() => {
+    if (selectedRole === ROLES.BENEFICIARY && db) {
+      const campaignsRef = collection(db, 'campaigns');
+      const q = query(campaignsRef, where('status', '==', 'active'));
+      onSnapshot(q, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setCampaigns(data);
+      });
+    }
+  }, [selectedRole]);
 
   const handleRegister = async (e) => {
     e.preventDefault();
@@ -109,19 +125,34 @@ export default function Register() {
         roleProfile.organization = formData.organization || null;
         roleProfile.description = formData.description;
         roleProfile.documentUrl = documentUrl;
+        roleProfile.campaignId = formData.campaignId;
         roleProfile.allocatedFunds = 0;
         roleProfile.spentFunds = 0;
-        roleProfile.linkedCampaign = null;
       }
 
       // Save both documents
       const profileCollection = `${selectedRole}_profile`;
       
+      // Add role-specific fields to users document for admin visibility
+      const usersDocument = {
+        ...baseProfile,
+        role: selectedRole
+      };
+
+      // Include organization, description, and documentUrl in users collection for admin/organizer dashboard
+      if (selectedRole === ROLES.ORGANIZER || selectedRole === ROLES.BENEFICIARY) {
+        usersDocument.organization = formData.organization;
+        usersDocument.description = formData.description;
+        usersDocument.documentUrl = documentUrl;
+      }
+      
+      // Include campaign ID for beneficiaries
+      if (selectedRole === ROLES.BENEFICIARY) {
+        usersDocument.campaignId = formData.campaignId;
+      }
+      
       await Promise.all([
-        setDoc(doc(db, 'users', publicKey), {
-          ...baseProfile,
-          role: selectedRole
-        }),
+        setDoc(doc(db, 'users', publicKey), usersDocument),
         setDoc(doc(db, profileCollection, publicKey), roleProfile)
       ]);
 
@@ -268,11 +299,38 @@ export default function Register() {
                 </div>
               )}
 
+              {/* Campaign Selection (for Beneficiary only) */}
+              {selectedRole === ROLES.BENEFICIARY && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Select Relief Campaign *
+                  </label>
+                  <select
+                    required
+                    value={formData.campaignId}
+                    onChange={(e) => setFormData({ ...formData, campaignId: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
+                  >
+                    <option value="">-- Select a campaign --</option>
+                    {campaigns.map(campaign => (
+                      <option key={campaign.id} value={campaign.id}>
+                        {campaign.title} - {campaign.location}
+                      </option>
+                    ))}
+                  </select>
+                  {campaigns.length === 0 && (
+                    <p className="text-sm text-gray-500 mt-1">
+                      No active campaigns available. Please contact an organizer.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Description (for Organizer/Beneficiary) */}
               {!selectedRoleData.autoApprove && (
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Why do you need this role? *
+                    {selectedRole === ROLES.BENEFICIARY ? 'Why do you need relief funds?' : 'Why do you need this role?'} *
                   </label>
                   <textarea
                     required
@@ -280,7 +338,7 @@ export default function Register() {
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
                     rows="4"
-                    placeholder="Explain your need for this role..."
+                    placeholder={selectedRole === ROLES.BENEFICIARY ? 'Describe your situation and how you were affected...' : 'Explain your need for this role...'}
                   />
                 </div>
               )}
@@ -321,7 +379,9 @@ export default function Register() {
                     <div>
                       <h4 className="font-semibold text-yellow-800">Verification Required</h4>
                       <p className="text-sm text-yellow-700">
-                        Your application will be reviewed by our admin team. You'll be notified once approved.
+                        {selectedRole === ROLES.BENEFICIARY 
+                          ? 'Your application will be reviewed by the campaign organizer. You\'ll be notified once approved.'
+                          : 'Your application will be reviewed by our admin team. You\'ll be notified once approved.'}
                       </p>
                     </div>
                   </div>
