@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { db } from '../firebase/config';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { freighterService } from '../services/freighterService';
@@ -7,9 +7,10 @@ import { USER_STATUS, ROLES } from '../firebase/constants';
 
 export default function PendingApproval() {
   const navigate = useNavigate();
-  const [userData, setUserData] = useState(null);
+  const location = useLocation();
+  const [userData, setUserData] = useState(location.state?.userData || null);
   const [campaign, setCampaign] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!location.state?.justRegistered);
 
   useEffect(() => {
     let unsubscribe;
@@ -17,6 +18,19 @@ export default function PendingApproval() {
     const checkApprovalStatus = async () => {
       try {
         const publicKey = await freighterService.getPublicKey();
+        
+        // If coming from registration, load campaign info immediately
+        if (location.state?.justRegistered && userData?.role === ROLES.BENEFICIARY && userData?.campaignId) {
+          try {
+            const campaignDoc = await getDoc(doc(db, 'campaigns', userData.campaignId));
+            if (campaignDoc.exists()) {
+              setCampaign(campaignDoc.data());
+            }
+          } catch (error) {
+            console.error('Error loading campaign:', error);
+          }
+          setLoading(false);
+        }
         
         if (db) {
           // Real-time listener for approval status

@@ -160,7 +160,13 @@ export default function Register() {
       if (status === USER_STATUS.APPROVED) {
         navigate(`/${selectedRole}/dashboard`);
       } else {
-        navigate('/pending-approval');
+        // Pass user data to avoid loading state
+        navigate('/pending-approval', { 
+          state: { 
+            userData: usersDocument,
+            justRegistered: true 
+          } 
+        });
       }
 
     } catch (error) {
