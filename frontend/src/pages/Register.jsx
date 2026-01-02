@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAccount } from 'wagmi';
 import { db, storage } from '../firebase/config';
 import { doc, setDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { ROLES, USER_STATUS } from '../firebase/constants';
-import { freighterService } from '../services/freighterService';
 
 export default function Register() {
   const navigate = useNavigate();
+  const { address, isConnected } = useAccount();
   const [loading, setLoading] = useState(false);
   const [selectedRole, setSelectedRole] = useState(null);
   const [formData, setFormData] = useState({
@@ -20,6 +21,13 @@ export default function Register() {
   const [documentFile, setDocumentFile] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [campaigns, setCampaigns] = useState([]);
+
+  // Check wallet connection
+  useEffect(() => {
+    if (!isConnected || !address) {
+      navigate('/login');
+    }
+  }, [isConnected, address, navigate]);
 
   const roles = [
     {
@@ -69,12 +77,15 @@ export default function Register() {
       return;
     }
 
+    if (!address) {
+      alert('Please connect your wallet first');
+      navigate('/login');
+      return;
+    }
+
     setLoading(true);
     
     try {
-      // Get wallet address
-      const publicKey = await freighterService.getPublicKey();
-      
       // Check if user needs approval
       const role = roles.find(r => r.id === selectedRole);
       const status = role.autoApprove ? USER_STATUS.APPROVED : USER_STATUS.PENDING;
@@ -82,7 +93,7 @@ export default function Register() {
       // Prepare profile data
       const timestamp = new Date().toISOString();
       const baseProfile = {
-        walletAddress: publicKey,
+        walletAddress: address,
         name: formData.name,
         email: formData.email,
         status: status,
@@ -100,7 +111,7 @@ export default function Register() {
       let documentUrl = null;
       if (documentFile && storage) {
         try {
-          const fileRef = ref(storage, `verification-documents/${publicKey}/${documentFile.name}`);
+          const fileRef = ref(storage, `verification-documents/${address}/${documentFile.name}`);
           await uploadBytes(fileRef, documentFile);
           documentUrl = await getDownloadURL(fileRef);
         } catch (uploadError) {
@@ -152,8 +163,8 @@ export default function Register() {
       }
       
       await Promise.all([
-        setDoc(doc(db, 'users', publicKey), usersDocument),
-        setDoc(doc(db, profileCollection, publicKey), roleProfile)
+        setDoc(doc(db, 'users', address), usersDocument),
+        setDoc(doc(db, profileCollection, address), roleProfile)
       ]);
 
       // Navigate immediately

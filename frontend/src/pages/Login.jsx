@@ -1,51 +1,32 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAccount, useConnect } from 'wagmi';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { SUPER_ADMIN_ADDRESS, APP_NAME, USER_STATUS } from '../firebase/constants';
-import { freighterService } from '../services/freighterService';
 
 function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [freighterInstalled, setFreighterInstalled] = useState(false);
+  const [hasClickedConnect, setHasClickedConnect] = useState(false);
+  const { address, isConnected } = useAccount();
   const navigate = useNavigate();
 
   useEffect(() => {
-    checkFreighter();
-  }, []);
+    // Only auto-check wallet connection if user clicked connect button
+    if (isConnected && address && hasClickedConnect) {
+      handleWalletConnected(address);
+    }
+  }, [isConnected, address, hasClickedConnect]);
 
-  const checkFreighter = async () => {
-    const installed = await freighterService.isInstalled();
-    setFreighterInstalled(installed);
-  };
-
-  const connectWallet = async () => {
+  const handleWalletConnected = async (walletAddress) => {
     setLoading(true);
     setError('');
 
     try {
-      // Check if Freighter is installed
-      if (!freighterInstalled) {
-        setError('Please install Freighter wallet extension');
-        window.open('https://www.freighter.app/', '_blank');
-        setLoading(false);
-        return;
-      }
-
-      // Request access permission
-      const allowed = await freighterService.requestAccess();
-      if (!allowed) {
-        setError('Please allow access to Freighter wallet');
-        setLoading(false);
-        return;
-      }
-
-      // Get public key
-      const publicKey = await freighterService.getPublicKey();
-
       // Check if Super Admin
-      if (publicKey === SUPER_ADMIN_ADDRESS) {
+      if (walletAddress.toLowerCase() === SUPER_ADMIN_ADDRESS.toLowerCase()) {
         navigate('/admin/dashboard');
         return;
       }
@@ -58,7 +39,7 @@ function Login() {
       }
 
       // Check if user exists in Firestore
-      const userRef = doc(db, 'users', publicKey);
+      const userRef = doc(db, 'users', walletAddress);
       const userSnap = await getDoc(userRef);
 
       if (!userSnap.exists()) {
@@ -77,14 +58,13 @@ function Login() {
 
       // Route based on status
       if (userData.status === USER_STATUS.PENDING) {
-        navigate('/pending-approval');
+        navigate('/pending-approval', { state: { user: userData } });
       } else if (userData.status === USER_STATUS.REJECTED) {
         alert('Your application was rejected. Please contact support.');
         navigate('/register');
       } else if (userData.status === USER_STATUS.APPROVED) {
         navigate(`/${userData.role}/dashboard`);
       }
-
 
     } catch (error) {
       console.error('❌ Connection error:', error);
@@ -112,21 +92,21 @@ function Login() {
           </p>
         </div>
 
-        {/* Freighter Status */}
+        {/* Wallet Connection Status */}
         <div className="mb-6">
-          {freighterInstalled ? (
+          {isConnected && address ? (
             <div className="flex items-center justify-center text-green-600 text-sm bg-green-50 py-2 px-4 rounded-lg">
               <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
               </svg>
-              Freighter wallet detected ✓
+              Wallet connected: {address.slice(0, 6)}...{address.slice(-4)}
             </div>
           ) : (
             <div className="flex items-center justify-center text-orange-600 text-sm bg-orange-50 py-2 px-4 rounded-lg">
               <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
               </svg>
-              Freighter wallet not installed
+              No wallet connected
             </div>
           )}
         </div>
@@ -143,60 +123,92 @@ function Login() {
           </div>
         )}
 
-        {/* Connect Button */}
-        <button
-          onClick={connectWallet}
-          disabled={loading}
-          className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-4 rounded-xl font-semibold text-lg hover:from-blue-700 hover:to-purple-700 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shadow-lg flex items-center justify-center"
-        >
-          {loading ? (
-            <>
-              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Connecting...
-            </>
-          ) : (
-            <>
-              <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-              Connect Freighter Wallet
-            </>
-          )}
-        </button>
+        {/* Connect Button with RainbowKit */}
+        <div className="w-full">
+          <ConnectButton.Custom>
+            {({
+              account,
+              chain,
+              openAccountModal,
+              openChainModal,
+              openConnectModal,
+              mounted,
+            }) => {
+              const ready = mounted;
+              const connected = ready && account && chain;
 
-        {/* Install Freighter Link */}
-        {!freighterInstalled && (
-          <div className="mt-6 text-center">
-            <p className="text-sm text-gray-600 mb-2">
-              Don't have Freighter wallet?
-            </p>
-            <a
-              href="https://www.freighter.app/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:text-blue-800 hover:underline font-semibold"
-            >
-              Install Freighter Extension →
-            </a>
-          </div>
-        )}
+              return (
+                <div
+                  {...(!ready && {
+                    'aria-hidden': true,
+                    'style': {
+                      opacity: 0,
+                      pointerEvents: 'none',
+                      userSelect: 'none',
+                    },
+                  })}
+                >
+                  {(() => {
+                    if (!connected) {
+                      return (
+                        <button
+                          onClick={() => {
+                            setHasClickedConnect(true);
+                            openConnectModal();
+                          }}
+                          className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-4 rounded-xl font-semibold text-lg hover:from-blue-700 hover:to-purple-700 transition-all transform hover:scale-105 shadow-lg flex items-center justify-center"
+                        >
+                          <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                          </svg>
+                          Connect MetaMask Wallet
+                        </button>
+                      );
+                    }
+
+                    if (chain.unsupported) {
+                      return (
+                        <button
+                          onClick={openChainModal}
+                          className="w-full bg-red-600 text-white py-4 rounded-xl font-semibold text-lg hover:bg-red-700 transition-all shadow-lg"
+                        >
+                          Wrong network - Click to switch
+                        </button>
+                      );
+                    }
+
+                    return (
+                      <button
+                        onClick={openAccountModal}
+                        className="w-full bg-green-600 text-white py-4 rounded-xl font-semibold text-lg hover:bg-green-700 transition-all shadow-lg flex items-center justify-center"
+                      >
+                        <svg className="w-6 h-6 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                        {account.displayName}
+                        {account.displayBalance ? ` (${account.displayBalance})` : ''}
+                      </button>
+                    );
+                  })()}
+                </div>
+              );
+            }}
+          </ConnectButton.Custom>
+        </div>
 
         {/* Network Info */}
         <div className="mt-8 pt-6 border-t border-gray-200">
           <p className="text-xs text-gray-500 text-center mb-4">
-            🔒 Using Stellar <span className="font-semibold text-blue-600">Testnet</span>
+            🔒 Using Polygon <span className="font-semibold text-purple-600">Amoy Testnet</span>
           </p>
           
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
-              <p className="text-2xl font-bold text-blue-600">$0.00001</p>
-              <p className="text-xs text-gray-600">Transaction Fee</p>
+              <p className="text-2xl font-bold text-blue-600">Low</p>
+              <p className="text-xs text-gray-600">Gas Fees</p>
             </div>
             <div>
-              <p className="text-2xl font-bold text-purple-600">3s</p>
+              <p className="text-2xl font-bold text-purple-600">Fast</p>
               <p className="text-xs text-gray-600">Confirmation</p>
             </div>
             <div>
@@ -206,27 +218,27 @@ function Login() {
           </div>
         </div>
 
-        {/* Why Stellar */}
+        {/* Why Polygon */}
         <div className="mt-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-4">
           <h3 className="text-sm font-semibold text-gray-900 mb-2">
-            Why Stellar Blockchain?
+            Why Polygon Blockchain?
           </h3>
           <ul className="text-xs text-gray-700 space-y-1">
             <li className="flex items-start">
               <span className="text-green-500 mr-2">✓</span>
-              Lightning-fast transactions (3-5 seconds)
+              Fast & scalable transactions
             </li>
             <li className="flex items-start">
               <span className="text-green-500 mr-2">✓</span>
-              Near-zero fees (perfect for disaster relief)
+              Low transaction costs
             </li>
             <li className="flex items-start">
               <span className="text-green-500 mr-2">✓</span>
-              Built-in USDC stablecoin support
+              Smart contract support for transparency
             </li>
             <li className="flex items-start">
               <span className="text-green-500 mr-2">✓</span>
-              Environmentally friendly (low energy)
+              Ethereum-compatible & secure
             </li>
           </ul>
         </div>

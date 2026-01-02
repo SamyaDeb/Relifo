@@ -1,0 +1,11 @@
+{
+  "network": "Polygon Amoy Testnet",
+  "chainId": 80002,
+  "deployer": "0x74E36d4A7b33057e3928CE4bf4C8C53A93361C34",
+  "timestamp": "2026-01-02T16:17:03.983Z",
+  "contracts": {
+    "ReliefToken": "0x178C7cC74955a6051Af2411ee38e5061b05382D1",
+    "ReliefTokenSale": "0x1a0ae74c55b43473151688055A57C2A1EdB51d25",
+    "CampaignFactory": "0x7fd01153cA95C5B689D9d9df86c2a3898FF728C9"
+  }
+}
