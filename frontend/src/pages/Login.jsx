@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import { SUPER_ADMIN_ADDRESS, APP_NAME } from '../firebase/constants';
+import { SUPER_ADMIN_ADDRESS, APP_NAME, USER_STATUS } from '../firebase/constants';
 import { freighterService } from '../services/freighterService';
 
 function Login() {
@@ -43,24 +43,17 @@ function Login() {
 
       // Get public key
       const publicKey = await freighterService.getPublicKey();
-      console.log('✅ Connected wallet:', publicKey);
-
-      // Store in localStorage
-      localStorage.setItem('userAddress', publicKey);
 
       // Check if Super Admin
       if (publicKey === SUPER_ADMIN_ADDRESS) {
-        localStorage.setItem('userRole', 'admin');
-        console.log('🔐 Super Admin detected');
-        alert('✅ Super Admin Login Successful!\n\nAddress: ' + publicKey.substring(0, 10) + '...');
-        // navigate('/admin/dashboard'); // TODO: Create dashboard
+        navigate('/admin/dashboard');
         return;
       }
 
       // Check if Firebase is configured
       if (!db) {
-        console.warn('⚠️ Firebase not configured');
-        alert('⚠️ Firebase not configured yet.\n\nYour wallet is connected!\nAddress: ' + publicKey.substring(0, 10) + '...\n\nTo continue, set up Firebase credentials in .env file.');
+        alert('Firebase not configured. Please check your .env file.');
+        setLoading(false);
         return;
       }
 
@@ -70,44 +63,28 @@ function Login() {
 
       if (!userSnap.exists()) {
         // New user - go to role selection
-        console.log('👤 New user - redirecting to registration');
-        // navigate('/register'); // TODO: Create register page
-        alert('✅ New User Detected!\n\nAddress: ' + publicKey.substring(0, 10) + '...\n\nNext step: Create registration page');
+        navigate('/register');
         return;
       }
 
       // Existing user
       const userData = userSnap.data();
-      localStorage.setItem('userRole', userData.role);
 
-      // Update last login
-      await setDoc(userRef, {
-        lastLoginAt: new Date()
-      }, { merge: true });
+      // Update last login in background
+      setDoc(userRef, {
+        lastLoginAt: new Date().toISOString()
+      }, { merge: true }).catch(err => console.warn('Failed to update last login:', err));
 
-      console.log('✅ User logged in:', userData.role);
-
-      // Route based on verification status
-      if (userData.verificationStatus === 'pending') {
+      // Route based on status
+      if (userData.status === USER_STATUS.PENDING) {
         navigate('/pending-approval');
-      } else if (userData.verificationStatus === 'rejected') {
-        navigate('/application-rejected');
-      } else if (userData.verificationStatus === 'approved') {
-        // Route to role dashboard
-        switch (userData.role) {
-          case 'organizer':
-            navigate('/organizer/dashboard');
-            break;
-          case 'beneficiary':
-            navigate('/beneficiary/dashboard');
-            break;
-          case 'donor':
-            navigate('/donor/dashboard');
-            break;
-          default:
-            navigate('/');
-        }
+      } else if (userData.status === USER_STATUS.REJECTED) {
+        alert('Your application was rejected. Please contact support.');
+        navigate('/register');
+      } else if (userData.status === USER_STATUS.APPROVED) {
+        navigate(`/${userData.role}/dashboard`);
       }
+
 
     } catch (error) {
       console.error('❌ Connection error:', error);
