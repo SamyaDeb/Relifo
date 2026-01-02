@@ -7,6 +7,7 @@ import { freighterService } from '../../services/freighterService';
 export default function OrganizerDashboard() {
   const [campaigns, setCampaigns] = useState([]);
   const [pendingBeneficiaries, setPendingBeneficiaries] = useState([]);
+  const [approvedBeneficiaries, setApprovedBeneficiaries] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [walletAddress, setWalletAddress] = useState('');
@@ -43,13 +44,15 @@ export default function OrganizerDashboard() {
         // Load pending beneficiaries for these campaigns
         if (campaignIds.length > 0) {
           const usersRef = collection(db, 'users');
-          const beneficiariesQuery = query(
+          
+          // Query for PENDING beneficiaries
+          const pendingQuery = query(
             usersRef, 
             where('role', '==', 'beneficiary'),
             where('status', '==', USER_STATUS.PENDING)
           );
           
-          const unsubscribeBeneficiaries = onSnapshot(beneficiariesQuery, (benefSnapshot) => {
+          const unsubscribePending = onSnapshot(pendingQuery, (benefSnapshot) => {
             const allPendingBeneficiaries = benefSnapshot.docs.map(doc => ({ 
               id: doc.id, 
               ...doc.data() 
@@ -63,9 +66,31 @@ export default function OrganizerDashboard() {
             setPendingBeneficiaries(myPendingBeneficiaries);
           });
 
+          // Query for APPROVED beneficiaries
+          const approvedQuery = query(
+            usersRef, 
+            where('role', '==', 'beneficiary'),
+            where('status', '==', USER_STATUS.APPROVED)
+          );
+          
+          const unsubscribeApproved = onSnapshot(approvedQuery, (benefSnapshot) => {
+            const allApprovedBeneficiaries = benefSnapshot.docs.map(doc => ({ 
+              id: doc.id, 
+              ...doc.data() 
+            }));
+            
+            // Filter only beneficiaries for this organizer's campaigns
+            const myApprovedBeneficiaries = allApprovedBeneficiaries.filter(b => 
+              campaignIds.includes(b.campaignId)
+            );
+            
+            setApprovedBeneficiaries(myApprovedBeneficiaries);
+          });
+
           return () => {
             unsubscribeCampaigns();
-            unsubscribeBeneficiaries();
+            unsubscribePending();
+            unsubscribeApproved();
           };
         }
       });
@@ -145,12 +170,13 @@ export default function OrganizerDashboard() {
 
       {/* Stats */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-6 mb-8">
           <StatCard title="Total Campaigns" value={campaigns.length} icon="📋" />
           <StatCard title="Active" value={campaigns.filter(c => c.status === 'active').length} icon="✅" />
           <StatCard title="Total Raised" value={`$${campaigns.reduce((sum, c) => sum + (c.raised || 0), 0).toLocaleString()}`} icon="💰" />
-          <StatCard title="Total Beneficiaries" value={campaigns.reduce((sum, c) => sum + (c.beneficiaries || 0), 0)} icon="👥" />
+          <StatCard title="Total Beneficiaries" value={approvedBeneficiaries.length} icon="👥" />
           <StatCard title="Pending Approvals" value={pendingBeneficiaries.length} icon="⏳" color="bg-yellow-500" />
+          <StatCard title="Approved" value={approvedBeneficiaries.length} icon="✅" color="bg-green-500" />
         </div>
 
         {/* Tabs */}
@@ -168,14 +194,24 @@ export default function OrganizerDashboard() {
                 My Campaigns ({campaigns.length})
               </button>
               <button
-                onClick={() => setActiveTab('beneficiaries')}
+                onClick={() => setActiveTab('pending')}
                 className={`px-6 py-4 text-sm font-medium border-b-2 ${
-                  activeTab === 'beneficiaries'
+                  activeTab === 'pending'
                     ? 'border-indigo-500 text-indigo-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
                 Pending Beneficiaries ({pendingBeneficiaries.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('approved')}
+                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                  activeTab === 'approved'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Approved Beneficiaries ({approvedBeneficiaries.length})
               </button>
             </nav>
           </div>
@@ -208,7 +244,7 @@ export default function OrganizerDashboard() {
               </>
             )}
 
-            {activeTab === 'beneficiaries' && (
+            {activeTab === 'pending' && (
               <div className="space-y-4">
                 {pendingBeneficiaries.length === 0 ? (
                   <div className="text-center py-12">
@@ -226,6 +262,30 @@ export default function OrganizerDashboard() {
                       campaign={campaigns.find(c => c.id === beneficiary.campaignId)}
                       onApprove={handleApproveBeneficiary}
                       onReject={handleRejectBeneficiary}
+                      showActions={true}
+                    />
+                  ))
+                )}
+              </div>
+            )}
+
+            {activeTab === 'approved' && (
+              <div className="space-y-4">
+                {approvedBeneficiaries.length === 0 ? (
+                  <div className="text-center py-12">
+                    <span className="text-6xl mb-4 block">📋</span>
+                    <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                      No approved beneficiaries yet
+                    </h3>
+                    <p className="text-gray-600">Approved beneficiaries will appear here</p>
+                  </div>
+                ) : (
+                  approvedBeneficiaries.map(beneficiary => (
+                    <BeneficiaryCard 
+                      key={beneficiary.id} 
+                      beneficiary={beneficiary}
+                      campaign={campaigns.find(c => c.id === beneficiary.campaignId)}
+                      showActions={false}
                     />
                   ))
                 )}
@@ -486,7 +546,7 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
   );
 }
 
-function BeneficiaryCard({ beneficiary, campaign, onApprove, onReject }) {
+function BeneficiaryCard({ beneficiary, campaign, onApprove, onReject, showActions = true }) {
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleString('en-US', {
@@ -508,6 +568,11 @@ function BeneficiaryCard({ beneficiary, campaign, onApprove, onReject }) {
             <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-purple-100 text-purple-700">
               🤝 BENEFICIARY
             </span>
+            {beneficiary.status === USER_STATUS.APPROVED && (
+              <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-green-100 text-green-700">
+                ✅ APPROVED
+              </span>
+            )}
           </div>
           <p className="text-gray-600 text-sm">
             Applied for: <span className="font-semibold text-indigo-600">{campaign?.title || 'Unknown Campaign'}</span>
@@ -602,26 +667,28 @@ function BeneficiaryCard({ beneficiary, campaign, onApprove, onReject }) {
       </div>
 
       {/* Action Buttons */}
-      <div className="flex gap-3 pt-4 border-t-2 border-gray-100">
-        <button
-          onClick={() => onApprove(beneficiary.id)}
-          className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white py-4 rounded-lg font-bold text-lg transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
-        >
-          <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-          </svg>
-          APPROVE FOR CAMPAIGN
-        </button>
-        <button
-          onClick={() => onReject(beneficiary.id)}
-          className="flex-1 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white py-4 rounded-lg font-bold text-lg transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
-        >
-          <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-          </svg>
-          REJECT APPLICATION
-        </button>
-      </div>
+      {showActions && (
+        <div className="flex gap-3 pt-4 border-t-2 border-gray-100">
+          <button
+            onClick={() => onApprove(beneficiary.id)}
+            className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white py-4 rounded-lg font-bold text-lg transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+          >
+            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            APPROVE FOR CAMPAIGN
+          </button>
+          <button
+            onClick={() => onReject(beneficiary.id)}
+            className="flex-1 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white py-4 rounded-lg font-bold text-lg transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
+          >
+            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            REJECT APPLICATION
+          </button>
+        </div>
+      )}
     </div>
   );
 }
