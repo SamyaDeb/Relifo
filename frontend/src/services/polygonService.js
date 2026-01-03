@@ -8,6 +8,7 @@ import { polygonAmoy } from 'wagmi/chains';
 
 // Import contract ABIs
 import ReliefTokenABI from '../contracts/ReliefToken.json';
+import ReliefTokenSaleABI from '../contracts/ReliefTokenSale.json';
 import CampaignFactoryABI from '../contracts/CampaignFactory.json';
 import CampaignABI from '../contracts/Campaign.json';
 import BeneficiaryWalletABI from '../contracts/BeneficiaryWallet.json';
@@ -171,6 +172,23 @@ export const getReliefTokenContract = (walletClient) => {
   return getContract({
     address: CONTRACTS.reliefToken,
     abi: ReliefTokenABI.abi,
+    client: walletClient,
+  });
+};
+
+/**
+ * Get ReliefTokenSale contract instance
+ * @param {object} walletClient - Viem wallet client
+ * @returns {object} Contract instance
+ */
+export const getReliefTokenSaleContract = (walletClient) => {
+  if (!CONTRACTS.reliefTokenSale) {
+    throw new Error('ReliefTokenSale address not configured');
+  }
+  
+  return getContract({
+    address: CONTRACTS.reliefTokenSale,
+    abi: ReliefTokenSaleABI.abi,
     client: walletClient,
   });
 };
@@ -421,6 +439,7 @@ export default {
   
   // Contract functions
   getReliefTokenContract,
+  getReliefTokenSaleContract,
   getCampaignFactoryContract,
   getCampaignContract,
   getBeneficiaryWalletContract,

@@ -6,12 +6,15 @@ import { freighterService } from '../../services/freighterService';
 import { useAccount, useWalletClient } from 'wagmi';
 import { parseEther } from 'viem';
 import { getCampaignFactoryContract, parseContractError, getPolygonScanUrl } from '../../services/polygonService';
+import AllocateFundsModal from '../../components/AllocateFundsModal';
 
 export default function OrganizerDashboard() {
   const [campaigns, setCampaigns] = useState([]);
   const [pendingBeneficiaries, setPendingBeneficiaries] = useState([]);
   const [approvedBeneficiaries, setApprovedBeneficiaries] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showAllocateModal, setShowAllocateModal] = useState(false);
+  const [selectedCampaign, setSelectedCampaign] = useState(null);
   const [loading, setLoading] = useState(true);
   const [walletAddress, setWalletAddress] = useState('');
   const [activeTab, setActiveTab] = useState('campaigns');
@@ -240,7 +243,15 @@ export default function OrganizerDashboard() {
                 ) : (
                   <div className="grid gap-6">
                     {campaigns.map(campaign => (
-                      <CampaignCard key={campaign.id} campaign={campaign} />
+                      <CampaignCard 
+                        key={campaign.id} 
+                        campaign={campaign}
+                        approvedBeneficiaries={approvedBeneficiaries.filter(b => b.campaignId === campaign.id)}
+                        onAllocateFunds={(camp) => {
+                          setSelectedCampaign(camp);
+                          setShowAllocateModal(true);
+                        }}
+                      />
                     ))}
                   </div>
                 )}
@@ -312,6 +323,18 @@ export default function OrganizerDashboard() {
           organizerId={walletAddress}
         />
       )}
+
+      {/* Allocate Funds Modal */}
+      {showAllocateModal && selectedCampaign && (
+        <AllocateFundsModal
+          campaign={selectedCampaign}
+          beneficiaries={approvedBeneficiaries.filter(b => b.campaignId === selectedCampaign.id)}
+          onClose={() => {
+            setShowAllocateModal(false);
+            setSelectedCampaign(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -328,7 +351,7 @@ function StatCard({ title, value, icon, color = 'bg-indigo-500' }) {
   );
 }
 
-function CampaignCard({ campaign }) {
+function CampaignCard({ campaign, approvedBeneficiaries = [], onAllocateFunds }) {
   const progress = (campaign.raised / campaign.goal) * 100;
 
   return (
@@ -337,6 +360,11 @@ function CampaignCard({ campaign }) {
         <div className="flex-1">
           <h3 className="text-xl font-semibold text-gray-900 mb-2">{campaign.title}</h3>
           <p className="text-gray-600">{campaign.description}</p>
+          {campaign.blockchainAddress && (
+            <p className="text-xs text-gray-500 mt-2 font-mono">
+              📍 {campaign.blockchainAddress.slice(0, 10)}...{campaign.blockchainAddress.slice(-8)}
+            </p>
+          )}
         </div>
         <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
           campaign.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
@@ -364,26 +392,37 @@ function CampaignCard({ campaign }) {
         <div className="grid grid-cols-3 gap-4 pt-2">
           <div>
             <p className="text-sm text-gray-500">Raised</p>
-            <p className="text-lg font-bold text-gray-900">${(campaign.raised || 0).toLocaleString()}</p>
+            <p className="text-lg font-bold text-gray-900">{(campaign.raised || 0).toLocaleString()} RELIEF</p>
           </div>
           <div>
             <p className="text-sm text-gray-500">Goal</p>
-            <p className="text-lg font-bold text-gray-900">${campaign.goal.toLocaleString()}</p>
+            <p className="text-lg font-bold text-gray-900">{campaign.goal.toLocaleString()} RELIEF</p>
           </div>
           <div>
-            <p className="text-sm text-gray-500">Beneficiaries</p>
-            <p className="text-lg font-bold text-gray-900">{campaign.beneficiaries || 0}</p>
+            <p className="text-sm text-gray-500">Available Beneficiaries</p>
+            <p className="text-lg font-bold text-gray-900">{approvedBeneficiaries.length}</p>
           </div>
         </div>
 
         {/* Actions */}
         <div className="flex gap-2 pt-4 border-t">
-          <button className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 font-semibold">
-            Manage
+          <button 
+            onClick={() => onAllocateFunds(campaign)}
+            disabled={!campaign.blockchainAddress || approvedBeneficiaries.length === 0 || (campaign.raised || 0) === 0}
+            className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            💰 Allocate Funds
           </button>
-          <button className="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg hover:bg-gray-200 font-semibold">
-            View Details
-          </button>
+          {campaign.txHash && (
+            <a
+              href={getPolygonScanUrl(campaign.txHash)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg hover:bg-gray-200 font-semibold text-center"
+            >
+              View on PolygonScan ↗
+            </a>
+          )}
         </div>
       </div>
     </div>
