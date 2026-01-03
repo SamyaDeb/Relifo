@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccount, useConnect } from 'wagmi';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { injected } from 'wagmi/connectors';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { SUPER_ADMIN_ADDRESS, APP_NAME, USER_STATUS } from '../firebase/constants';
@@ -11,6 +11,7 @@ function Login() {
   const [error, setError] = useState('');
   const [hasClickedConnect, setHasClickedConnect] = useState(false);
   const { address, isConnected } = useAccount();
+  const { connect, connectors } = useConnect();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -74,6 +75,30 @@ function Login() {
     }
   };
 
+  const handleConnectWallet = async () => {
+    try {
+      setHasClickedConnect(true);
+      setError('');
+      
+      // Find MetaMask connector (injected connector)
+      const metamaskConnector = connectors.find(
+        (connector) => connector.id === 'injected' || connector.id === 'metaMask'
+      );
+      
+      if (!metamaskConnector) {
+        setError('MetaMask not found. Please install MetaMask extension.');
+        return;
+      }
+
+      // Directly connect to MetaMask
+      await connect({ connector: metamaskConnector });
+    } catch (err) {
+      console.error('Connection error:', err);
+      setError(err.message || 'Failed to connect to MetaMask');
+      setHasClickedConnect(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500">
       <div className="bg-white p-8 rounded-2xl shadow-2xl max-w-md w-full">
@@ -123,77 +148,38 @@ function Login() {
           </div>
         )}
 
-        {/* Connect Button with RainbowKit */}
+        {/* Connect Button */}
         <div className="w-full">
-          <ConnectButton.Custom>
-            {({
-              account,
-              chain,
-              openAccountModal,
-              openChainModal,
-              openConnectModal,
-              mounted,
-            }) => {
-              const ready = mounted;
-              const connected = ready && account && chain;
-
-              return (
-                <div
-                  {...(!ready && {
-                    'aria-hidden': true,
-                    'style': {
-                      opacity: 0,
-                      pointerEvents: 'none',
-                      userSelect: 'none',
-                    },
-                  })}
-                >
-                  {(() => {
-                    if (!connected) {
-                      return (
-                        <button
-                          onClick={() => {
-                            setHasClickedConnect(true);
-                            openConnectModal();
-                          }}
-                          className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-4 rounded-xl font-semibold text-lg hover:from-blue-700 hover:to-purple-700 transition-all transform hover:scale-105 shadow-lg flex items-center justify-center"
-                        >
-                          <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                          </svg>
-                          Connect MetaMask Wallet
-                        </button>
-                      );
-                    }
-
-                    if (chain.unsupported) {
-                      return (
-                        <button
-                          onClick={openChainModal}
-                          className="w-full bg-red-600 text-white py-4 rounded-xl font-semibold text-lg hover:bg-red-700 transition-all shadow-lg"
-                        >
-                          Wrong network - Click to switch
-                        </button>
-                      );
-                    }
-
-                    return (
-                      <button
-                        onClick={openAccountModal}
-                        className="w-full bg-green-600 text-white py-4 rounded-xl font-semibold text-lg hover:bg-green-700 transition-all shadow-lg flex items-center justify-center"
-                      >
-                        <svg className="w-6 h-6 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                        </svg>
-                        {account.displayName}
-                        {account.displayBalance ? ` (${account.displayBalance})` : ''}
-                      </button>
-                    );
-                  })()}
+          {!isConnected ? (
+            <button
+              onClick={handleConnectWallet}
+              disabled={loading}
+              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-4 rounded-xl font-semibold text-lg hover:from-blue-700 hover:to-purple-700 transition-all transform hover:scale-105 shadow-lg flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              {loading ? 'Connecting...' : 'Connect MetaMask Wallet'}
+            </button>
+          ) : (
+            <div className="text-center">
+              <div className="inline-flex items-center justify-center w-12 h-12 bg-green-100 rounded-full mb-4">
+                <svg className="w-6 h-6 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <p className="text-gray-600 mb-2">Wallet Connected</p>
+              <p className="text-sm text-gray-500 font-mono bg-gray-100 px-4 py-2 rounded">
+                {address?.slice(0, 6)}...{address?.slice(-4)}
+              </p>
+              {loading && (
+                <div className="mt-4">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto"></div>
+                  <p className="text-gray-600 mt-2">Verifying...</p>
                 </div>
-              );
-            }}
-          </ConnectButton.Custom>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Network Info */}
