@@ -86,27 +86,31 @@ function Login() {
         return;
       }
       
-      // Find injected connector (MetaMask)
+      // Directly request MetaMask to open - this will trigger the popup immediately
+      try {
+        await window.ethereum.request({ method: 'eth_requestAccounts' });
+      } catch (error) {
+        console.error('MetaMask request error:', error);
+        throw error;
+      }
+      
+      // Then connect using wagmi
       const injectedConnector = connectors.find(
         (connector) => connector.id === 'injected'
       );
       
-      if (!injectedConnector) {
-        // If no injected connector found, use the first available connector
-        if (connectors.length > 0) {
-          await connect({ connector: connectors[0] });
-        } else {
-          setError('No wallet connectors available');
-          setHasClickedConnect(false);
-        }
-        return;
+      if (injectedConnector) {
+        await connect({ connector: injectedConnector });
+      } else if (connectors.length > 0) {
+        await connect({ connector: connectors[0] });
       }
-
-      // Directly connect to MetaMask
-      await connect({ connector: injectedConnector });
     } catch (err) {
       console.error('Connection error:', err);
-      setError(err.message || 'Failed to connect to MetaMask');
+      if (err.code === 4001) {
+        setError('Connection rejected. Please approve the connection in MetaMask.');
+      } else {
+        setError(err.message || 'Failed to connect to MetaMask');
+      }
       setHasClickedConnect(false);
     }
   };
