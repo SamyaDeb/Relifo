@@ -3,6 +3,9 @@ import { db } from '../../firebase/config';
 import { collection, addDoc, doc, updateDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { USER_STATUS } from '../../firebase/constants';
 import { freighterService } from '../../services/freighterService';
+import { useAccount, useWalletClient } from 'wagmi';
+import { parseEther } from 'viem';
+import { getCampaignFactoryContract, parseContractError, getPolygonScanUrl } from '../../services/polygonService';
 
 export default function OrganizerDashboard() {
   const [campaigns, setCampaigns] = useState([]);
@@ -397,12 +400,70 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
     expectedBeneficiaries: ''
   });
   const [loading, setLoading] = useState(false);
+  const [txStatus, setTxStatus] = useState(''); // Status message for user
+  const { data: walletClient } = useWalletClient();
+  const { address } = useAccount();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setTxStatus('Preparing transaction...');
 
     try {
+      // Step 1: Deploy campaign to blockchain
+      setTxStatus('Deploying campaign to Polygon blockchain...');
+      
+      if (!walletClient) {
+        throw new Error('Please connect your wallet first');
+      }
+
+      // Get CampaignFactory contract
+      const campaignFactory = getCampaignFactoryContract(walletClient);
+      
+      // Convert goal to wei (assuming goal is in USD, we'll use it as RELIEF tokens 1:1)
+      const goalInWei = parseEther(formData.goal.toString());
+
+      // Call createCampaign on blockchain
+      setTxStatus('Please sign the transaction in MetaMask...');
+      
+      const tx = await campaignFactory.write.createCampaign([
+        formData.title,
+        formData.description,
+        goalInWei,
+        formData.location,
+        formData.disasterType
+      ]);
+
+      setTxStatus('Transaction submitted. Waiting for confirmation...');
+      
+      // Wait for transaction to be mined
+      const receipt = await walletClient.waitForTransactionReceipt({ hash: tx });
+      
+      // Extract campaign address from event logs
+      let campaignAddress = null;
+      
+      // Parse the logs to find CampaignCreated event
+      for (const log of receipt.logs) {
+        try {
+          // The first topic is the event signature, second is the campaign address
+          if (log.topics.length > 1) {
+            // Campaign address is typically the first indexed parameter
+            campaignAddress = `0x${log.topics[1].slice(26)}`; // Remove padding
+            break;
+          }
+        } catch (err) {
+          console.error('Error parsing log:', err);
+        }
+      }
+
+      if (!campaignAddress && receipt.logs.length > 0) {
+        // Fallback: try to get from contract address in first log
+        campaignAddress = receipt.logs[0].address;
+      }
+
+      setTxStatus('Campaign deployed! Saving to database...');
+
+      // Step 2: Save to Firebase with blockchain data
       if (db) {
         await addDoc(collection(db, 'campaigns'), {
           ...formData,
@@ -412,9 +473,15 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
           raised: 0,
           beneficiaries: 0,
           status: 'active',
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          // Blockchain data
+          blockchainAddress: campaignAddress,
+          txHash: tx,
+          network: 'polygon-amoy',
+          chainId: 80002
         });
-        alert('Campaign created successfully!');
+        
+        alert(`✅ Campaign created successfully!\n\nBlockchain Address: ${campaignAddress}\n\nView on PolygonScan: ${getPolygonScanUrl(tx)}`);
         onSuccess();
       } else {
         alert('Demo mode - Firebase not configured');
@@ -422,9 +489,11 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
       }
     } catch (error) {
       console.error('Error creating campaign:', error);
-      alert('Failed to create campaign');
+      const errorMessage = parseContractError(error);
+      alert(`Failed to create campaign: ${errorMessage}`);
     } finally {
       setLoading(false);
+      setTxStatus('');
     }
   };
 
@@ -524,6 +593,16 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
             </div>
           </div>
 
+          {/* Transaction Status */}
+          {txStatus && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center gap-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                <p className="text-sm text-blue-800 font-medium">{txStatus}</p>
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-3 pt-4">
             <button
               type="button"
@@ -535,9 +614,16 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 px-6 py-3 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 disabled:bg-gray-400"
+              className="flex-1 px-6 py-3 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
-              {loading ? 'Creating...' : 'Create Campaign'}
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  Creating on Blockchain...
+                </span>
+              ) : (
+                'Create Campaign on Blockchain'
+              )}
             </button>
           </div>
         </form>
