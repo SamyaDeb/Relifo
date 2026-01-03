@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccount, useConnect } from 'wagmi';
-import { injected } from 'wagmi/connectors';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { SUPER_ADMIN_ADDRESS, APP_NAME, USER_STATUS } from '../firebase/constants';
@@ -80,18 +79,31 @@ function Login() {
       setHasClickedConnect(true);
       setError('');
       
-      // Find MetaMask connector (injected connector)
-      const metamaskConnector = connectors.find(
-        (connector) => connector.id === 'injected' || connector.id === 'metaMask'
+      // Check if MetaMask is installed
+      if (typeof window.ethereum === 'undefined') {
+        setError('MetaMask not found. Please install MetaMask extension from https://metamask.io');
+        setHasClickedConnect(false);
+        return;
+      }
+      
+      // Find injected connector (MetaMask)
+      const injectedConnector = connectors.find(
+        (connector) => connector.id === 'injected'
       );
       
-      if (!metamaskConnector) {
-        setError('MetaMask not found. Please install MetaMask extension.');
+      if (!injectedConnector) {
+        // If no injected connector found, use the first available connector
+        if (connectors.length > 0) {
+          await connect({ connector: connectors[0] });
+        } else {
+          setError('No wallet connectors available');
+          setHasClickedConnect(false);
+        }
         return;
       }
 
       // Directly connect to MetaMask
-      await connect({ connector: metamaskConnector });
+      await connect({ connector: injectedConnector });
     } catch (err) {
       console.error('Connection error:', err);
       setError(err.message || 'Failed to connect to MetaMask');
