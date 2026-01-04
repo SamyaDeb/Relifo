@@ -64,39 +64,3 @@ main()
     console.error(error);
     process.exit(1);
   });
-    return;
-  }
-
-  // Approve the merchant
-  console.log('\n📝 Submitting approval transaction...');
-  const tx = await BeneficiaryWallet.approveMerchant(MERCHANT_ADDRESS, CATEGORY);
-  
-  console.log('📤 Transaction hash:', tx.hash);
-  console.log('🔗 PolygonScan:', `https://amoy.polygonscan.com/tx/${tx.hash}`);
-  console.log('⏳ Waiting for confirmation...');
-  
-  const receipt = await tx.wait();
-  
-  if (receipt.status === 1) {
-    console.log('\n✅ SUCCESS! Merchant approved!');
-    console.log('------------------------------------------------------------');
-    console.log('✓ Merchant:', MERCHANT_ADDRESS);
-    console.log('✓ Category:', CATEGORIES[CATEGORY]);
-    console.log('✓ Beneficiary Wallet:', BENEFICIARY_WALLET_ADDRESS);
-    console.log('------------------------------------------------------------');
-    console.log('\n🎉 Beneficiary can now spend at this merchant for', CATEGORIES[CATEGORY], 'purchases!');
-    
-    // Verify the approval
-    const isNowApproved = await BeneficiaryWallet.isMerchantApproved(MERCHANT_ADDRESS, CATEGORY);
-    console.log('Verification:', isNowApproved ? '✅ Confirmed' : '❌ Failed');
-  } else {
-    console.log('\n❌ Transaction failed!');
-  }
-}
-
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error('\n❌ Error:', error);
-    process.exit(1);
-  });
