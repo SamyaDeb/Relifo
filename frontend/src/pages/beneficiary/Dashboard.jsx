@@ -639,7 +639,7 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
       }
 
       setIsProcessing(true);
-      setTxStatus('Preparing spending transaction...');
+      setTxStatus('Checking merchant approval...');
 
       const amountInWei = parseEther(amount);
       const publicClient = getPublicClient(config);
@@ -654,13 +654,33 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
       // Map category to Category enum (0 = Food, 1 = Medicine, etc.)
       const categoryIndex = categories.indexOf(category);
 
+      // Check if merchant is approved for this category
+      setTxStatus('Verifying merchant approval...');
+      const isApproved = await publicClient.readContract({
+        address: walletAddress,
+        abi: BeneficiaryWalletABI.abi,
+        functionName: 'isMerchantApproved',
+        args: [merchantAddress, categoryIndex],
+      });
+
+      if (!isApproved) {
+        setIsProcessing(false);
+        alert(`❌ Merchant Not Approved\n\nThis merchant (${merchantName}) is not approved for ${category} purchases.\n\n📋 To spend at this merchant:\n1. Request merchant approval from your organizer\n2. Contact: Your campaign organizer\n3. Provide: Merchant address and category\n\nMerchant Address:\n${merchantAddress}\n\nCategory: ${category} (${categoryIndex})`);
+        return;
+      }
+
+      // Prepare description (merchant name and category)
+      const description = `Purchase from ${merchantName} - ${category}`;
+
+      setTxStatus('Preparing spending transaction...');
+
       // Gas estimation to check for errors
       try {
         const gasEstimate = await publicClient.estimateContractGas({
           address: walletAddress,
           abi: BeneficiaryWalletABI.abi,
           functionName: 'spend',
-          args: [merchantAddress, amountInWei, categoryIndex],
+          args: [merchantAddress, amountInWei, categoryIndex, description],
           account: address,
         });
         console.log('✅ Gas estimation successful:', gasEstimate);
@@ -671,6 +691,8 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
           errorMsg = 'Only the beneficiary can spend these funds';
         } else if (gasError.message?.includes('Insufficient balance')) {
           errorMsg = 'Insufficient balance in wallet';
+        } else if (gasError.message?.includes('not approved')) {
+          errorMsg = 'Merchant not approved for this category. Please contact your organizer to approve this merchant.';
         } else if (gasError.shortMessage) {
           errorMsg = gasError.shortMessage;
         }
@@ -683,7 +705,7 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
         address: walletAddress,
         abi: BeneficiaryWalletABI.abi,
         functionName: 'spend',
-        args: [merchantAddress, amountInWei, categoryIndex],
+        args: [merchantAddress, amountInWei, categoryIndex, description],
         account: address,
       });
 
