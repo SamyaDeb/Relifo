@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useWalletClient } from 'wagmi';
 import { parseEther, formatEther } from 'viem';
-import polygonService from '../services/polygonService';
+import polygonService, { getPolygonScanUrl } from '../services/polygonService';
 import { doc, updateDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { getPublicClient } from '@wagmi/core';
@@ -194,37 +194,100 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
         });
 
         console.log('📝 Transaction hash:', txHash);
+        
+        // Show transaction link immediately
+        alert(`Transaction submitted! 🎉\n\nTransaction Hash: ${txHash}\n\nView on PolygonScan: ${getPolygonScanUrl(txHash, 'tx')}\n\nPlease wait for confirmation (30-60 seconds)...`);
       } catch (txError) {
         console.error('Transaction error:', txError);
         throw txError; // This is a real error, rethrow it
       }
 
-      setTxStatus('Waiting for transaction confirmation...');
+      setTxStatus('⏳ Waiting for blockchain confirmation (this may take 30-60 seconds)...');
       
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+      // Wait for transaction confirmation with extended timeout (5 minutes for testnet)
+      let receipt;
+      try {
+        receipt = await publicClient.waitForTransactionReceipt({ 
+          hash: txHash,
+          timeout: 300_000, // 5 minutes timeout for testnet
+          confirmations: 2 // Wait for 2 confirmations for safety
+        });
+        
+        console.log('✅ Transaction confirmed:', receipt);
+        console.log('🎉 Allocation successful on blockchain!');
+      } catch (receiptError) {
+        console.error('❌ Timeout waiting for confirmation:', receiptError);
+        console.log('━'.repeat(60));
+        console.log('⚠️ TRANSACTION MAY STILL BE PENDING');
+        console.log('━'.repeat(60));
+        console.log('Transaction Hash:', txHash);
+        console.log('PolygonScan:', getPolygonScanUrl(txHash, 'tx'));
+        console.log('');
+        console.log('The transaction was sent but confirmation is taking longer than expected.');
+        console.log('This is normal on testnets. The funds WILL be allocated when it confirms.');
+        console.log('');
+        console.log('Next steps:');
+        console.log('1. Check PolygonScan link above to see transaction status');
+        console.log('2. Wait a few minutes and refresh beneficiary dashboard');
+        console.log('3. The transaction will confirm automatically');
+        console.log('━'.repeat(60));
+        
+        // Don't throw error - the transaction was sent successfully
+        // We'll still try to update Firebase
+        alert(`⏳ Transaction Pending\n\nYour transaction was sent successfully but is still pending.\n\nHash: ${txHash.slice(0, 10)}...\n\nCheck status: ${getPolygonScanUrl(txHash, 'tx')}\n\nThe funds will be allocated once the transaction confirms (usually 1-2 minutes on testnet).`);
+        
+        // Create a dummy receipt for Firebase update
+        receipt = {
+          transactionHash: txHash,
+          blockNumber: 'pending',
+          status: 'pending',
+          logs: []
+        };
+      }
       
       console.log('✅ Transaction confirmed:', receipt);
       console.log('🎉 Allocation successful on blockchain!');
 
-      // Extract beneficiary wallet address from event logs
+      // Extract beneficiary wallet address from event logs or query blockchain
       let walletAddress = null;
-      try {
-        for (const log of receipt.logs) {
-          // Find FundsAllocated event
-          if (log.topics.length >= 2) {
-            // The beneficiary address is in the first indexed parameter (topic[1])
-            const beneficiaryFromLog = `0x${log.topics[1].slice(26)}`;
-            if (beneficiaryFromLog.toLowerCase() === beneficiary.walletAddress.toLowerCase()) {
-              // Wallet address is typically in the log data or topic[2]
-              if (log.topics.length >= 3) {
-                walletAddress = `0x${log.topics[2].slice(26)}`;
+      
+      // If we have a confirmed transaction, try to get wallet from logs
+      if (receipt.status !== 'pending' && receipt.logs && receipt.logs.length > 0) {
+        try {
+          for (const log of receipt.logs) {
+            // Find FundsAllocated event
+            if (log.topics.length >= 2) {
+              // The beneficiary address is in the first indexed parameter (topic[1])
+              const beneficiaryFromLog = `0x${log.topics[1].slice(26)}`;
+              if (beneficiaryFromLog.toLowerCase() === beneficiary.walletAddress.toLowerCase()) {
+                // Wallet address is typically in the log data or topic[2]
+                if (log.topics.length >= 3) {
+                  walletAddress = `0x${log.topics[2].slice(26)}`;
+                }
+                break;
               }
-              break;
             }
           }
+        } catch (logErr) {
+          console.warn('Could not parse wallet address from logs:', logErr);
         }
-      } catch (logErr) {
-        console.warn('Could not parse wallet address from logs, will continue anyway:', logErr);
+      }
+      
+      // If we couldn't get wallet from logs, query the contract directly
+      if (!walletAddress) {
+        console.log('📞 Querying blockchain for beneficiary wallet address...');
+        try {
+          walletAddress = await publicClient.readContract({
+            address: campaign.blockchainAddress || campaign.contractAddress,
+            abi: CampaignABI.abi,
+            functionName: 'getBeneficiaryWallet',
+            args: [beneficiary.walletAddress],
+          });
+          console.log('✅ Got wallet address from blockchain:', walletAddress);
+        } catch (queryErr) {
+          console.warn('⚠️ Could not query wallet address from blockchain:', queryErr);
+          console.log('This is OK - the wallet will be created when transaction confirms');
+        }
       }
 
       // Update Firebase - if this fails, we still succeeded on blockchain
@@ -316,7 +379,12 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
         console.warn('Could not reload balance:', balanceError);
       }
       
-      alert(`✅ Funds allocated successfully!\n\nAmount: ${amount} RELIEF\nBeneficiary: ${beneficiary.name || beneficiary.email}\n\nTransaction: ${txHash.substring(0, 10)}...`);
+      // Show success message
+      if (receipt.status === 'pending') {
+        alert(`⏳ Transaction Pending\n\nAmount: ${amount} RELIEF\nBeneficiary: ${beneficiary.name || beneficiary.email}\n\nThe transaction was sent successfully!\nIt will confirm in 1-2 minutes on testnet.\n\nView status: ${getPolygonScanUrl(txHash, 'tx')}`);
+      } else {
+        alert(`✅ Funds Allocated Successfully!\n\nAmount: ${amount} RELIEF\nBeneficiary: ${beneficiary.name || beneficiary.email}\n\nTransaction confirmed!\n\nView on PolygonScan: ${getPolygonScanUrl(txHash, 'tx')}\n\nThe beneficiary can now see and spend these funds.`);
+      }
       
       setIsProcessing(false);
       setTxStatus('');
