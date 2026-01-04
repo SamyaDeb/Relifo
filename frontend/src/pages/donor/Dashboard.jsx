@@ -20,17 +20,85 @@ export default function DonorDashboard() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    loadData();
+    if (!address) {
+      setLoading(false);
+      return;
+    }
+
+    console.log('🔄 Donor Dashboard: Setting up listeners for', address);
+    
     loadReliefBalance();
     
     // Refresh balance every 5 seconds for real-time updates
     const balanceInterval = setInterval(() => {
-      if (address) {
-        loadReliefBalance();
-      }
+      loadReliefBalance();
     }, 5000);
+
+    // Set up real-time listeners
+    let unsubscribeCampaigns;
+    let unsubscribeDonations;
+
+    const setupListeners = async () => {
+      try {
+        if (!db) {
+          // Demo mode
+          setCampaigns([
+            { id: '1', title: 'Flood Relief - Kerala', goal: 50000, raised: 25000, location: 'Kerala, India' },
+            { id: '2', title: 'Earthquake Recovery - Nepal', goal: 100000, raised: 75000, location: 'Kathmandu, Nepal' }
+          ]);
+          setDonations([
+            { id: '1', campaign: 'Flood Relief - Kerala', amount: 500, date: '2025-12-20' }
+          ]);
+          setStats({ totalDonated: 500, campaignsSupported: 1 });
+          setLoading(false);
+          return;
+        }
+
+        // Realtime listener for active campaigns
+        const campaignsRef = collection(db, 'campaigns');
+        const campaignsQuery = query(campaignsRef, where('status', '==', 'active'));
+        unsubscribeCampaigns = onSnapshot(campaignsQuery, (snapshot) => {
+          const campaignsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          console.log('📋 Donor Dashboard: Campaigns updated:', campaignsData.length);
+          setCampaigns(campaignsData);
+        });
+
+        // Realtime listener for user's donations
+        const donationsRef = collection(db, 'donations');
+        const donationsQuery = query(donationsRef, where('donorId', '==', address.toLowerCase()));
+        unsubscribeDonations = onSnapshot(donationsQuery, (snapshot) => {
+          const donationsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          console.log('💰 Donor Dashboard: Donations updated:', donationsData.length);
+          console.log('💰 Donation records:', donationsData.map(d => ({
+            campaign: d.campaignTitle,
+            amount: d.amount,
+            txHash: d.txHash?.substring(0, 10) + '...'
+          })));
+          setDonations(donationsData);
+
+          // Calculate stats in realtime
+          const totalDonated = donationsData.reduce((sum, d) => sum + parseFloat(d.amount), 0);
+          console.log('💰 Total donated calculated:', totalDonated);
+          const uniqueCampaigns = new Set(donationsData.map(d => d.campaignId));
+          setStats({ totalDonated, campaignsSupported: uniqueCampaigns.size });
+        });
+
+        setLoading(false);
+      } catch (error) {
+        console.error('❌ Error setting up listeners:', error);
+        setLoading(false);
+      }
+    };
+
+    setupListeners();
     
-    return () => clearInterval(balanceInterval);
+    // Cleanup function
+    return () => {
+      console.log('🧹 Donor Dashboard: Cleaning up listeners');
+      clearInterval(balanceInterval);
+      if (unsubscribeCampaigns) unsubscribeCampaigns();
+      if (unsubscribeDonations) unsubscribeDonations();
+    };
   }, [address]);
 
   const loadReliefBalance = async () => {
@@ -50,61 +118,6 @@ export default function DonorDashboard() {
       setReliefBalance(formatEther(balance));
     } catch (error) {
       console.error('Error loading RELIEF balance:', error);
-    }
-  };
-
-  const loadData = async () => {
-    try {
-      if (!address) {
-        setLoading(false);
-        return;
-      }
-
-      if (!db) {
-        // Demo mode
-        setCampaigns([
-          { id: '1', title: 'Flood Relief - Kerala', goal: 50000, raised: 25000, location: 'Kerala, India' },
-          { id: '2', title: 'Earthquake Recovery - Nepal', goal: 100000, raised: 75000, location: 'Kathmandu, Nepal' }
-        ]);
-        setDonations([
-          { id: '1', campaign: 'Flood Relief - Kerala', amount: 500, date: '2025-12-20' }
-        ]);
-        setStats({ totalDonated: 500, campaignsSupported: 1 });
-        setLoading(false);
-        return;
-      }
-
-      // Realtime listener for active campaigns
-      const campaignsRef = collection(db, 'campaigns');
-      const campaignsQuery = query(campaignsRef, where('status', '==', 'active'));
-      const unsubscribeCampaigns = onSnapshot(campaignsQuery, (snapshot) => {
-        const campaignsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setCampaigns(campaignsData);
-      });
-
-      // Realtime listener for user's donations
-      const donationsRef = collection(db, 'donations');
-      const donationsQuery = query(donationsRef, where('donorId', '==', address.toLowerCase()));
-      const unsubscribeDonations = onSnapshot(donationsQuery, (snapshot) => {
-        const donationsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setDonations(donationsData);
-
-        // Calculate stats in realtime
-        const totalDonated = donationsData.reduce((sum, d) => sum + parseFloat(d.amount), 0);
-        const uniqueCampaigns = new Set(donationsData.map(d => d.campaignId));
-        setStats({ totalDonated, campaignsSupported: uniqueCampaigns.size });
-      });
-
-      setLoading(false);
-
-      // Cleanup listeners on unmount
-      return () => {
-        unsubscribeCampaigns();
-        unsubscribeDonations();
-      };
-    } catch (error) {
-      console.error('Error loading data:', error);
-      setLoading(false);
     }
   };
 
@@ -236,9 +249,12 @@ export default function DonorDashboard() {
 
           {/* Right Card - Donation Stats */}
           <div className="glass-card border border-white/20 rounded-3xl p-5 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all h-[200px] flex flex-col">
-            <h2 className="text-lg font-semibold text-white mb-2 flex-shrink-0">Total Donated - {stats.totalDonated.toFixed(1)}</h2>
+            <h2 className="text-lg font-semibold text-white mb-2 flex-shrink-0">
+              Total Donated: {stats.totalDonated.toFixed(2)} RELIEF
+            </h2>
+            <p className="text-xs text-white/60 mb-3">From {donations.length} donation{donations.length !== 1 ? 's' : ''} to {stats.campaignsSupported} campaign{stats.campaignsSupported !== 1 ? 's' : ''}</p>
             
-            <div className="mt-4 flex-1 flex flex-col overflow-hidden">
+            <div className="mt-2 flex-1 flex flex-col overflow-hidden">
               <h3 className="text-base font-semibold text-white mb-3 flex-shrink-0">My Donation History</h3>
               <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar">
                 {donations.length === 0 ? (
@@ -247,7 +263,7 @@ export default function DonorDashboard() {
                   donations.slice(0, 5).map(donation => (
                     <div key={donation.id} className="flex justify-between items-center text-xs border-b border-white/10 pb-1">
                       <span className="text-white/80 truncate mr-2">{donation.campaignTitle || 'Campaign'}</span>
-                      <span className="text-green-400 font-semibold whitespace-nowrap">{donation.amount} RELIEF</span>
+                      <span className="text-green-400 font-semibold whitespace-nowrap">{parseFloat(donation.amount).toFixed(2)} RELIEF</span>
                     </div>
                   ))
                 )}
@@ -288,12 +304,22 @@ export default function DonorDashboard() {
                 const userDonations = donations.filter(d => d.campaignId === campaign.id);
                 const totalSupported = userDonations.reduce((sum, d) => sum + parseFloat(d.amount), 0);
                 const progress = campaign.goal > 0 ? (campaign.raised / campaign.goal) * 100 : 0;
+                
+                console.log(`💝 Campaign "${campaign.title}":`, {
+                  'Your donations count': userDonations.length,
+                  'Your total': totalSupported,
+                  'Campaign raised (all donors)': campaign.raised,
+                  'Your donation records': userDonations.map(d => d.amount)
+                });
 
                 return (
                   <div key={campaign.id} className="glass-card border border-white/10 rounded-2xl p-3 bg-white/5 hover:bg-white/10 transition-all">
                     <div className="flex justify-between items-center mb-2">
                       <h3 className="text-xs font-semibold text-white truncate mr-2">{campaign.title}</h3>
-                      <span className="text-green-400 font-semibold text-xs whitespace-nowrap">{totalSupported.toFixed(1)}</span>
+                      <div className="flex flex-col items-end">
+                        <span className="text-green-400 font-semibold text-xs whitespace-nowrap">You: {totalSupported.toFixed(2)} RELIEF</span>
+                        <span className="text-white/40 text-[10px] whitespace-nowrap">Total: {campaign.raised?.toFixed(2) || 0} RELIEF</span>
+                      </div>
                     </div>
                     
                     {/* Progress Bar */}
@@ -305,10 +331,21 @@ export default function DonorDashboard() {
                         />
                       </div>
                       <div className="flex justify-between text-xs text-white/40 mt-1">
-                        <span>{campaign.raised?.toFixed(1) || 0} RELIEF</span>
+                        <span>Goal: {campaign.goal?.toFixed(1) || 0} RELIEF</span>
                         <span>{progress.toFixed(0)}%</span>
                       </div>
                     </div>
+
+                    {/* Donate Again Button */}
+                    <button
+                      onClick={() => {
+                        setSelectedCampaign(campaign);
+                        setDonateModalOpen(true);
+                      }}
+                      className="w-full mt-2 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-1.5 px-3 rounded-lg text-xs font-semibold hover:shadow-lg transition-all"
+                    >
+                      💝 Donate Again
+                    </button>
                   </div>
                 );
               })
@@ -648,6 +685,14 @@ function DonateModal({ campaign, onClose }) {
       setTxStatus('Preparing transaction...');
 
       const amountInWei = parseEther(amount);
+      
+      console.log('=== Donation Details ===');
+      console.log('Donor address:', address);
+      console.log('Campaign blockchain address:', campaign.blockchainAddress);
+      console.log('Amount:', amount, 'RELIEF');
+      console.log('Amount in Wei:', amountInWei.toString());
+      console.log('RELIEF Token address:', polygonService.CONTRACTS.reliefToken);
+      console.log('Donor balance:', balance, 'RELIEF');
 
       // Check balance
       if (parseFloat(amount) > parseFloat(balance)) {
@@ -672,12 +717,37 @@ function DonateModal({ campaign, onClose }) {
 
       // Approve if needed
       if (currentAllowance < amountInWei) {
+        setTxStatus('Estimating gas for approval...');
+        
+        // Try to estimate gas first to get better error messages
+        try {
+          const gasEstimate = await client.estimateContractGas({
+            address: polygonService.CONTRACTS.reliefToken,
+            abi: ReliefTokenABI,
+            functionName: 'approve',
+            args: [campaign.blockchainAddress, amountInWei],
+            account: address,
+          });
+          console.log('Approval gas estimate:', gasEstimate);
+        } catch (estimateError) {
+          console.error('❌ Approval gas estimation failed!');
+          console.error('Estimate error:', estimateError);
+          if (estimateError.shortMessage) {
+            console.error('Short message:', estimateError.shortMessage);
+          }
+          if (estimateError.details) {
+            console.error('Details:', estimateError.details);
+          }
+          throw new Error('Approval would fail: ' + (estimateError.shortMessage || estimateError.message));
+        }
+        
         setTxStatus('Please approve RELIEF tokens in MetaMask...');
         const approveTxHash = await walletClient.writeContract({
           address: polygonService.CONTRACTS.reliefToken,
           abi: ReliefTokenABI,
           functionName: 'approve',
           args: [campaign.blockchainAddress, amountInWei],
+          account: address,
         });
         
         setTxStatus('Waiting for approval confirmation...');
