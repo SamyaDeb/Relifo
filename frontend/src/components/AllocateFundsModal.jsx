@@ -1,20 +1,21 @@
 import { useState, useEffect } from 'react';
-import { useWalletClient } from 'wagmi';
+import { useWalletClient, useAccount } from 'wagmi';
 import { parseEther, formatEther } from 'viem';
 import polygonService, { getPolygonScanUrl } from '../services/polygonService';
-import { doc, updateDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { doc, updateDoc, addDoc, collection, getDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { getPublicClient } from '@wagmi/core';
 import { config } from '../config/wagmiConfig';
 import CampaignABI from '../contracts/Campaign.json';
 
-export default function AllocateFundsModal({ campaign, beneficiaries, onClose }) {
+export default function AllocateFundsModal({ campaign, beneficiaries, onClose, onSuccess }) {
   const [selectedBeneficiary, setSelectedBeneficiary] = useState('');
   const [amount, setAmount] = useState('');
   const [txStatus, setTxStatus] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [campaignBalance, setCampaignBalance] = useState('0');
   const { data: walletClient } = useWalletClient();
+  const { address } = useAccount();
 
   useEffect(() => {
     loadCampaignBalance();
@@ -29,7 +30,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
       
       console.log('📊 Loading campaign balance for:', campaign.blockchainAddress);
       
-      const publicClient = getPublicClient(config);
+      const publicClient = getPublicClient(config, { chainId: 80002 });
       
       // Read campaignInfo struct which contains raisedAmount
       const campaignInfoData = await publicClient.readContract({
@@ -91,12 +92,65 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
         return;
       }
 
+      if (!address) {
+        alert('Wallet address not found');
+        return;
+      }
+
       if (parseFloat(amount) > parseFloat(campaignBalance)) {
         alert(`Insufficient funds in campaign.\n\nAvailable: ${campaignBalance} RELIEF\nRequested: ${amount} RELIEF`);
         return;
       }
 
       setIsProcessing(true);
+      setTxStatus('Validating network and contract...');
+
+      const publicClient = getPublicClient(config, { chainId: 80002 });
+
+      // CRITICAL: Verify we're on Polygon Amoy testnet
+      console.log('🔍 Checking network...');
+      const chainId = await publicClient.getChainId();
+      console.log('Current Chain ID:', chainId);
+      
+      if (chainId !== 80002) {
+        setIsProcessing(false);
+        alert(`❌ Wrong Network!\n\nYou are connected to Chain ID: ${chainId}\n\nPlease switch to Polygon Amoy Testnet (Chain ID: 80002) in MetaMask.\n\n1. Open MetaMask\n2. Click network dropdown\n3. Select "Polygon Amoy Testnet"\n4. Try again`);
+        return;
+      }
+      console.log('✅ Connected to Polygon Amoy testnet');
+
+      // Verify contract exists
+      console.log('🔍 Checking if contract exists...');
+      const code = await publicClient.getBytecode({
+        address: campaign.blockchainAddress,
+      });
+      
+      if (!code || code === '0x') {
+        setIsProcessing(false);
+        alert(`❌ Contract Not Found!\n\nThe campaign contract does not exist at:\n${campaign.blockchainAddress}\n\nThis means the campaign was not properly deployed.\n\nPlease contact the administrator.`);
+        return;
+      }
+      console.log('✅ Contract exists at address');
+
+      // Verify organizer permissions
+      console.log('🔍 Checking organizer permissions...');
+      const campaignInfo = await publicClient.readContract({
+        address: campaign.blockchainAddress,
+        abi: CampaignABI.abi,
+        functionName: 'campaignInfo',
+      });
+      
+      const contractOrganizer = campaignInfo[6]; // organizer is at index 6
+      console.log('Contract Organizer:', contractOrganizer);
+      console.log('Your Address:', address);
+      
+      if (contractOrganizer.toLowerCase() !== address.toLowerCase()) {
+        setIsProcessing(false);
+        alert(`❌ Permission Denied!\n\nYou are not the organizer of this campaign.\n\nCampaign Organizer: ${contractOrganizer}\nYour Address: ${address}\n\nOnly the organizer can allocate funds.`);
+        return;
+      }
+      console.log('✅ You are the campaign organizer');
+
       setTxStatus('Preparing allocation...');
 
       const amountInWei = parseEther(amount);
@@ -113,29 +167,21 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
         amount: amount,
         amountInWei: amountInWei.toString(),
         campaign: campaign.blockchainAddress,
-        organizerAddress: walletClient.account.address
+        organizerAddress: address,
+        chainId: chainId
       });
-
-      // First, estimate gas to reveal any errors
-      const publicClient = getPublicClient(config);
       
       setTxStatus('Checking allocation requirements...');
       console.log('⚡ Estimating gas for allocation...');
       
       // Read campaign state first to debug
-      const campaignInfoData = await publicClient.readContract({
-        address: campaign.blockchainAddress,
-        abi: CampaignABI.abi,
-        functionName: 'campaignInfo',
-      });
-      
       const totalAllocated = await publicClient.readContract({
         address: campaign.blockchainAddress,
         abi: CampaignABI.abi,
         functionName: 'totalAllocated',
       });
       
-      const raisedAmount = campaignInfoData[3];
+      const raisedAmount = campaignInfo[3];
       
       console.log('📊 Pre-allocation check:', {
         raisedAmount: formatEther(raisedAmount),
@@ -184,20 +230,64 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
       
       let txHash;
       try {
+        console.log('📤 Sending transaction to blockchain...');
+        console.log('Contract:', campaign.blockchainAddress);
+        console.log('Function: allocateFunds');
+        console.log('Args:', [beneficiary.walletAddress, amountInWei.toString()]);
+        console.log('From:', address);
+        console.log('Chain ID:', chainId);
+        
         // Execute allocation transaction
         txHash = await walletClient.writeContract({
           address: campaign.blockchainAddress,
           abi: CampaignABI.abi,
           functionName: 'allocateFunds',
           args: [beneficiary.walletAddress, amountInWei],
-          account: walletClient.account,
+          account: address,
+          chain: {
+            id: 80002,
+            name: 'Polygon Amoy',
+            network: 'polygon-amoy',
+            nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
+            rpcUrls: {
+              default: { http: ['https://rpc-amoy.polygon.technology'] },
+              public: { http: ['https://rpc-amoy.polygon.technology'] },
+            },
+            blockExplorers: {
+              default: { name: 'PolygonScan', url: 'https://amoy.polygonscan.com' },
+            },
+            testnet: true,
+          },
         });
 
         console.log('✅ Transaction sent! Hash:', txHash);
         console.log('🔗 PolygonScan:', getPolygonScanUrl(txHash, 'tx'));
+        
+        // Immediately verify the transaction exists on the blockchain
+        setTxStatus('Verifying transaction on blockchain...');
+        
+        try {
+          const txCheck = await publicClient.getTransaction({ hash: txHash });
+          console.log('✅ Transaction found on blockchain:', txCheck);
+        } catch (checkError) {
+          console.error('❌ CRITICAL: Transaction hash not found on blockchain!', checkError);
+          throw new Error(`Transaction hash ${txHash} not found on Polygon Amoy. This usually means:\n\n1. Wrong network selected in MetaMask (check you're on Polygon Amoy)\n2. Network connectivity issue\n3. Invalid contract address\n\nPlease check MetaMask network settings and try again.`);
+        }
       } catch (txError) {
         console.error('❌ Transaction submission failed:', txError);
-        throw new Error('Transaction rejected or failed to submit');
+        
+        // Check if it's a user rejection
+        if (txError.message?.includes('User rejected') || txError.code === 4001) {
+          throw new Error('Transaction cancelled by user');
+        }
+        
+        // Check if it's a network error
+        if (txError.message?.includes('network') || txError.message?.includes('RPC')) {
+          throw new Error('Network error. Please check your internet connection and MetaMask network settings.');
+        }
+        
+        // Generic error
+        throw new Error(`Transaction failed: ${txError.message || 'Unknown error'}`);
       }
 
       setTxStatus('Transaction sent! Waiting for confirmation...');

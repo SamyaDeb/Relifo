@@ -436,7 +436,7 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
       console.log('Checking approval for address:', address);
       console.log('CampaignFactory address:', CONTRACTS.campaignFactory);
       
-      const client = getPublicClient(config);
+      const client = getPublicClient(config, { chainId: 80002 });
       
       const isApproved = await client.readContract({
         address: CONTRACTS.campaignFactory,
@@ -511,7 +511,7 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
       // Call createCampaign on blockchain
       setTxStatus('Please sign the transaction in MetaMask...');
       
-      const publicClient = getPublicClient(config);
+      const publicClient = getPublicClient(config, { chainId: 80002 });
       let tx;
       try {
         // First try to estimate gas to get better error messages

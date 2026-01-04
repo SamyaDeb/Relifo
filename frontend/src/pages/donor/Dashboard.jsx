@@ -108,7 +108,7 @@ export default function DonorDashboard() {
       const { getPublicClient } = await import('@wagmi/core');
       const { config } = await import('../../config/wagmiConfig');
       
-      const client = getPublicClient(config);
+      const client = getPublicClient(config, { chainId: 80002 });
       const balance = await client.readContract({
         address: polygonService.CONTRACTS.reliefToken,
         abi: (await import('../../contracts/ReliefToken.json')).default.abi,
@@ -485,7 +485,7 @@ function BuyTokensModal({ onClose, onSuccess }) {
       const { publicClient } = await import('wagmi/actions');
       const { getPublicClient } = await import('@wagmi/core');
       const { config } = await import('../../config/wagmiConfig');
-      const client = getPublicClient(config);
+      const client = getPublicClient(config, { chainId: 80002 });
       await client.waitForTransactionReceipt({ hash: tx });
 
       setTxStatus('Success! Tokens purchased.');
@@ -651,7 +651,7 @@ function DonateModal({ campaign, onClose }) {
       const { getPublicClient } = await import('@wagmi/core');
       const { config } = await import('../../config/wagmiConfig');
       
-      const client = getPublicClient(config);
+      const client = getPublicClient(config, { chainId: 80002 });
       const bal = await client.readContract({
         address: polygonService.CONTRACTS.reliefToken,
         abi: (await import('../../contracts/ReliefToken.json')).default.abi,
@@ -704,7 +704,7 @@ function DonateModal({ campaign, onClose }) {
       const CampaignABI = (await import('../../contracts/Campaign.json')).default.abi;
       const { getPublicClient } = await import('@wagmi/core');
       const { config } = await import('../../config/wagmiConfig');
-      const client = getPublicClient(config);
+      const client = getPublicClient(config, { chainId: 80002 });
 
       // Check allowance
       setTxStatus('Checking token allowance...');

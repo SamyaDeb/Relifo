@@ -31,7 +31,7 @@ export default function VerifyMerchantModal({ merchant, onClose, onSuccess }) {
       setIsProcessing(true);
       setTxStatus('Verifying merchant on blockchain...');
 
-      const publicClient = getPublicClient(config);
+      const publicClient = getPublicClient(config, { chainId: 80002 });
 
       console.log('🔐 Verifying merchant:', {
         merchant: merchant.walletAddress,

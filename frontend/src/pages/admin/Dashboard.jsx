@@ -122,7 +122,7 @@ export default function AdminDashboard() {
           console.log('Checking blockchain approval for organizer:', user.walletAddress);
           console.log('Using admin wallet:', address);
           
-          const publicClient = getPublicClient(config);
+          const publicClient = getPublicClient(config, { chainId: 80002 });
           
           // First check if already approved on blockchain
           console.log('Checking if already approved on blockchain...');
@@ -150,6 +150,7 @@ export default function AdminDashboard() {
           // Try to estimate gas first to get better error messages
           console.log('Estimating gas for approval...');
           const campaignFactory = getCampaignFactoryContract(walletClient);
+          const publicClient = getPublicClient(config, { chainId: 80002 });
           
           try {
             const gasEstimate = await publicClient.estimateContractGas({

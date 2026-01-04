@@ -32,7 +32,7 @@ export default function BeneficiaryDashboard() {
       console.log('Campaign Address:', campaignAddress);
       console.log('Beneficiary Address:', address);
       
-      const publicClient = getPublicClient(config);
+      const publicClient = getPublicClient(config, { chainId: 80002 });
       
       // Get beneficiary wallet address from campaign contract
       const walletAddress = await publicClient.readContract({
@@ -184,7 +184,7 @@ export default function BeneficiaryDashboard() {
   const loadWalletBalance = async (walletAddress) => {
     try {
       console.log('💰 Loading balance for wallet:', walletAddress);
-      const publicClient = getPublicClient(config);
+      const publicClient = getPublicClient(config, { chainId: 80002 });
       
       // Get RELIEF token balance of BeneficiaryWallet
       const balance = await publicClient.readContract({
@@ -642,7 +642,7 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
       setTxStatus('Checking merchant approval...');
 
       const amountInWei = parseEther(amount);
-      const publicClient = getPublicClient(config);
+      const publicClient = getPublicClient(config, { chainId: 80002 });
 
       console.log('🛒 Spending:', {
         wallet: walletAddress,

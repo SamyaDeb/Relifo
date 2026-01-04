@@ -31,7 +31,7 @@ export default function ApproveMerchantModal({ beneficiaryWalletAddress, benefic
       setIsProcessing(true);
       setTxStatus('Checking merchant approval status...');
 
-      const publicClient = getPublicClient(config);
+      const publicClient = getPublicClient(config, { chainId: 80002 });
       const categoryIndex = categories.indexOf(category);
 
       // Check if already approved
