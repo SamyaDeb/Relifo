@@ -109,8 +109,16 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
 
       // CRITICAL: Verify we're on Polygon Amoy testnet
       console.log('🔍 Checking network...');
-      const chainId = await publicClient.getChainId();
-      console.log('Current Chain ID:', chainId);
+      let chainId;
+      try {
+        chainId = await publicClient.getChainId();
+        console.log('Current Chain ID:', chainId);
+      } catch (chainError) {
+        console.error('Failed to get chain ID:', chainError);
+        setIsProcessing(false);
+        alert('❌ Network Error\n\nCannot connect to blockchain network.\n\nPlease check:\n1. MetaMask is unlocked\n2. You are connected to Polygon Amoy Testnet\n3. Your internet connection is stable\n\nThen try again.');
+        return;
+      }
       
       if (chainId !== 80002) {
         setIsProcessing(false);
@@ -121,9 +129,17 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
 
       // Verify contract exists
       console.log('🔍 Checking if contract exists...');
-      const code = await publicClient.getBytecode({
-        address: campaign.blockchainAddress,
-      });
+      let code;
+      try {
+        code = await publicClient.getBytecode({
+          address: campaign.blockchainAddress,
+        });
+      } catch (bytecodeError) {
+        console.error('Failed to get contract bytecode:', bytecodeError);
+        setIsProcessing(false);
+        alert('❌ Cannot verify contract\n\nFailed to check if campaign contract exists.\n\nPlease ensure you are on the correct network and try again.');
+        return;
+      }
       
       if (!code || code === '0x') {
         setIsProcessing(false);
@@ -134,11 +150,19 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
 
       // Verify organizer permissions
       console.log('🔍 Checking organizer permissions...');
-      const campaignInfo = await publicClient.readContract({
-        address: campaign.blockchainAddress,
-        abi: CampaignABI.abi,
-        functionName: 'campaignInfo',
-      });
+      let campaignInfo;
+      try {
+        campaignInfo = await publicClient.readContract({
+          address: campaign.blockchainAddress,
+          abi: CampaignABI.abi,
+          functionName: 'campaignInfo',
+        });
+      } catch (readError) {
+        console.error('Failed to read campaign info:', readError);
+        setIsProcessing(false);
+        alert('❌ Cannot read campaign data\n\nFailed to verify organizer permissions.\n\nThe contract may not be deployed correctly or there is a network issue.');
+        return;
+      }
       
       const contractOrganizer = campaignInfo[6]; // organizer is at index 6
       console.log('Contract Organizer:', contractOrganizer);
@@ -178,61 +202,61 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
       const totalAllocated = await publicClient.readContract({
         address: campaign.blockchainAddress,
         abi: CampaignABI.abi,
-        functionName: 'totalAllocated',
-      });
-      
-      const raisedAmount = campaignInfo[3];
-      
-      console.log('📊 Pre-allocation check:', {
-        raisedAmount: formatEther(raisedAmount),
-        totalAllocated: formatEther(totalAllocated),
-        requestedAmount: formatEther(amountInWei),
-        wouldBeTotal: formatEther(totalAllocated + amountInWei),
-        hasEnough: raisedAmount >= (totalAllocated + amountInWei)
-      });
-      
-      try {
-        const gasEstimate = await publicClient.estimateContractGas({
-          address: campaign.blockchainAddress,
-          abi: CampaignABI.abi,
-          functionName: 'allocateFunds',
-          args: [beneficiary.walletAddress, amountInWei],
-          account: walletClient.account.address,
+          functionName: 'totalAllocated',
         });
-        console.log('✅ Gas estimation successful:', gasEstimate);
-      } catch (gasError) {
-        console.error('❌ Gas estimation failed:');
-        console.error('Full error:', gasError);
-        console.error('Error name:', gasError.name);
-        console.error('Error message:', gasError.message);
-        console.error('Short message:', gasError.shortMessage);
-        console.error('Details:', gasError.details);
-        console.error('Meta messages:', gasError.metaMessages);
         
-        // Try to extract the actual revert reason
-        let errorMessage = 'Unknown error';
-        if (gasError.message) {
-          if (gasError.message.includes('Insufficient campaign balance')) {
-            errorMessage = `Campaign doesn't have enough funds.\n\nAvailable: ${formatEther(raisedAmount - totalAllocated)} RELIEF\nRequested: ${amount} RELIEF`;
-          } else if (gasError.message.includes('Invalid beneficiary')) {
-            errorMessage = 'Invalid beneficiary address';
-          } else if (gasError.shortMessage) {
-            errorMessage = gasError.shortMessage;
-          } else {
-            errorMessage = gasError.message;
+        const raisedAmount = campaignInfo[3];
+        
+        console.log('📊 Pre-allocation check:', {
+          raisedAmount: formatEther(raisedAmount),
+          totalAllocated: formatEther(totalAllocated),
+          requestedAmount: formatEther(amountInWei),
+          wouldBeTotal: formatEther(totalAllocated + amountInWei),
+          hasEnough: raisedAmount >= (totalAllocated + amountInWei)
+        });
+        
+        try {
+          const gasEstimate = await publicClient.estimateContractGas({
+            address: campaign.blockchainAddress,
+            abi: CampaignABI.abi,
+            functionName: 'allocateFunds',
+            args: [beneficiary.walletAddress, amountInWei],
+            account: walletClient.account.address,
+          });
+          console.log('✅ Gas estimation successful:', gasEstimate);
+        } catch (gasError) {
+          console.error('❌ Gas estimation failed:');
+          console.error('Full error:', gasError);
+          console.error('Error name:', gasError.name);
+          console.error('Error message:', gasError.message);
+          console.error('Short message:', gasError.shortMessage);
+          console.error('Details:', gasError.details);
+          console.error('Meta messages:', gasError.metaMessages);
+          
+          // Try to extract the actual revert reason
+          let errorMessage = 'Unknown error';
+          if (gasError.message) {
+            if (gasError.message.includes('Insufficient campaign balance')) {
+              errorMessage = `Campaign doesn't have enough funds.\n\nAvailable: ${formatEther(raisedAmount - totalAllocated)} RELIEF\nRequested: ${amount} RELIEF`;
+            } else if (gasError.message.includes('Invalid beneficiary')) {
+              errorMessage = 'Invalid beneficiary address';
+            } else if (gasError.shortMessage) {
+              errorMessage = gasError.shortMessage;
+            } else {
+              errorMessage = gasError.message;
+            }
           }
+          
+          throw new Error(`Cannot allocate funds: ${errorMessage}`);
         }
-        
-        throw new Error(`Cannot allocate funds: ${errorMessage}`);
-      }
 
-      setTxStatus('Please confirm the transaction in MetaMask...');
-      
-      let txHash;
-      try {
-        console.log('📤 Sending transaction to blockchain...');
-        console.log('Contract:', campaign.blockchainAddress);
-        console.log('Function: allocateFunds');
+        setTxStatus('Please confirm the transaction in MetaMask...');
+        
+        let txHash;
+        try {
+          console.log('📤 Sending transaction to blockchain...');
+          console.log('Contract:', campaign.blockchainAddress);
+          console.log('Function: allocateFunds');
         console.log('Args:', [beneficiary.walletAddress, amountInWei.toString()]);
         console.log('From:', address);
         console.log('Chain ID:', chainId);
