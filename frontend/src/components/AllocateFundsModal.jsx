@@ -287,31 +287,24 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
         console.log('✅ Transaction sent! Hash:', txHash);
         console.log('🔗 PolygonScan:', getPolygonScanUrl(txHash, 'tx'));
         
-        // Immediately verify the transaction exists on the blockchain
-        setTxStatus('Verifying transaction on blockchain...');
+        // Note: On testnets, there can be a delay before transaction appears in mempool
+        // We'll verify it during the receipt wait instead
         
-        try {
-          const txCheck = await publicClient.getTransaction({ hash: txHash });
-          console.log('✅ Transaction found on blockchain:', txCheck);
-        } catch (checkError) {
-          console.error('❌ CRITICAL: Transaction hash not found on blockchain!', checkError);
-          throw new Error(`Transaction hash ${txHash} not found on Polygon Amoy. This usually means:\n\n1. Wrong network selected in MetaMask (check you're on Polygon Amoy)\n2. Network connectivity issue\n3. Invalid contract address\n\nPlease check MetaMask network settings and try again.`);
-        }
       } catch (txError) {
         console.error('❌ Transaction submission failed:', txError);
         
         // Check if it's a user rejection
-        if (txError.message?.includes('User rejected') || txError.code === 4001) {
+        if (txError.message?.includes('User rejected') || txError.message?.includes('User denied') || txError.code === 4001 || txError.code === 'ACTION_REJECTED') {
           throw new Error('Transaction cancelled by user');
         }
         
-        // Check if it's a network error
-        if (txError.message?.includes('network') || txError.message?.includes('RPC')) {
-          throw new Error('Network error. Please check your internet connection and MetaMask network settings.');
+        // Check if it's insufficient funds
+        if (txError.message?.includes('insufficient funds')) {
+          throw new Error('Insufficient POL for gas fee. Please add POL to your wallet.');
         }
         
-        // Generic error
-        throw new Error(`Transaction failed: ${txError.message || 'Unknown error'}`);
+        // Generic error - don't mask the real error
+        throw new Error(`Transaction failed: ${txError.shortMessage || txError.message || 'Unknown error'}`);
       }
 
       setTxStatus('Transaction sent! Waiting for confirmation...');
@@ -319,6 +312,9 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
       // Wait for transaction confirmation with reasonable timeout
       let receipt;
       try {
+        console.log('⏳ Waiting for transaction confirmation...');
+        console.log('This may take 30-90 seconds on Polygon Amoy testnet');
+        
         receipt = await publicClient.waitForTransactionReceipt({ 
           hash: txHash,
           timeout: 120_000, // 2 minutes
