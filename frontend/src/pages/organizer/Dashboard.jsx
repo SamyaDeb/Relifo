@@ -2,13 +2,16 @@ import { useEffect, useState } from 'react';
 import { db } from '../../firebase/config';
 import { collection, addDoc, doc, updateDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { USER_STATUS } from '../../firebase/constants';
-import { freighterService } from '../../services/freighterService';
 import { useAccount, useWalletClient } from 'wagmi';
 import { parseEther } from 'viem';
-import { getCampaignFactoryContract, parseContractError, getPolygonScanUrl } from '../../services/polygonService';
+import { getCampaignFactoryContract, parseContractError, getPolygonScanUrl, CONTRACTS } from '../../services/polygonService';
+import { getPublicClient } from '@wagmi/core';
+import { config } from '../../config/wagmiConfig';
 import AllocateFundsModal from '../../components/AllocateFundsModal';
+import CampaignFactoryABI from '../../contracts/CampaignFactory.json';
 
 export default function OrganizerDashboard() {
+  const { address } = useAccount();
   const [campaigns, setCampaigns] = useState([]);
   const [pendingBeneficiaries, setPendingBeneficiaries] = useState([]);
   const [approvedBeneficiaries, setApprovedBeneficiaries] = useState([]);
@@ -16,99 +19,77 @@ export default function OrganizerDashboard() {
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [walletAddress, setWalletAddress] = useState('');
   const [activeTab, setActiveTab] = useState('campaigns');
 
   useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    try {
-      const publicKey = await freighterService.getPublicKey();
-      setWalletAddress(publicKey);
-
-      if (!db) {
-        // Demo mode
-        setCampaigns([
-          { id: '1', title: 'Flood Relief - Kerala', goal: 50000, raised: 25000, status: 'active', beneficiaries: 150 }
-        ]);
-        setLoading(false);
-        return;
-      }
-
-      // Realtime listener for organizer's campaigns
-      const campaignsRef = collection(db, 'campaigns');
-      const campaignsQuery = query(campaignsRef, where('organizerId', '==', publicKey));
-      const unsubscribeCampaigns = onSnapshot(campaignsQuery, (snapshot) => {
-        const campaignData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setCampaigns(campaignData);
-
-        // Get campaign IDs for this organizer
-        const campaignIds = campaignData.map(c => c.id);
-
-        // Load pending beneficiaries for these campaigns
-        if (campaignIds.length > 0) {
-          const usersRef = collection(db, 'users');
-          
-          // Query for PENDING beneficiaries
-          const pendingQuery = query(
-            usersRef, 
-            where('role', '==', 'beneficiary'),
-            where('status', '==', USER_STATUS.PENDING)
-          );
-          
-          const unsubscribePending = onSnapshot(pendingQuery, (benefSnapshot) => {
-            const allPendingBeneficiaries = benefSnapshot.docs.map(doc => ({ 
-              id: doc.id, 
-              ...doc.data() 
-            }));
-            
-            // Filter only beneficiaries for this organizer's campaigns
-            const myPendingBeneficiaries = allPendingBeneficiaries.filter(b => 
-              campaignIds.includes(b.campaignId)
-            );
-            
-            setPendingBeneficiaries(myPendingBeneficiaries);
-          });
-
-          // Query for APPROVED beneficiaries
-          const approvedQuery = query(
-            usersRef, 
-            where('role', '==', 'beneficiary'),
-            where('status', '==', USER_STATUS.APPROVED)
-          );
-          
-          const unsubscribeApproved = onSnapshot(approvedQuery, (benefSnapshot) => {
-            const allApprovedBeneficiaries = benefSnapshot.docs.map(doc => ({ 
-              id: doc.id, 
-              ...doc.data() 
-            }));
-            
-            // Filter only beneficiaries for this organizer's campaigns
-            const myApprovedBeneficiaries = allApprovedBeneficiaries.filter(b => 
-              campaignIds.includes(b.campaignId)
-            );
-            
-            setApprovedBeneficiaries(myApprovedBeneficiaries);
-          });
-
-          return () => {
-            unsubscribeCampaigns();
-            unsubscribePending();
-            unsubscribeApproved();
-          };
-        }
-      });
-
+    if (!address) {
       setLoading(false);
-
-      return () => unsubscribeCampaigns();
-    } catch (error) {
-      console.error('Error loading data:', error);
-      setLoading(false);
+      return;
     }
-  };
+
+    if (!db) {
+      // Demo mode
+      setCampaigns([
+        { id: '1', title: 'Flood Relief - Kerala', goal: 50000, raised: 25000, status: 'active', beneficiaries: 150 }
+      ]);
+      setLoading(false);
+      return;
+    }
+
+    // Realtime listener for organizer's campaigns
+    const campaignsRef = collection(db, 'campaigns');
+    const campaignsQuery = query(campaignsRef, where('organizerId', '==', address));
+    
+    const unsubscribeCampaigns = onSnapshot(campaignsQuery, (snapshot) => {
+      const campaignData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      console.log('📋 Campaigns loaded:', campaignData);
+      setCampaigns(campaignData);
+    });
+
+    // Load beneficiaries separately (independent from campaigns listener)
+    const usersRef = collection(db, 'users');
+    
+    // Query for PENDING beneficiaries
+    const pendingQuery = query(
+      usersRef, 
+      where('role', '==', 'beneficiary'),
+      where('status', '==', USER_STATUS.PENDING)
+    );
+    
+    const unsubscribePending = onSnapshot(pendingQuery, (benefSnapshot) => {
+      const allPendingBeneficiaries = benefSnapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      }));
+      console.log('⏳ Pending beneficiaries loaded:', allPendingBeneficiaries);
+      setPendingBeneficiaries(allPendingBeneficiaries);
+    });
+
+    // Query for APPROVED beneficiaries
+    const approvedQuery = query(
+      usersRef, 
+      where('role', '==', 'beneficiary'),
+      where('status', '==', USER_STATUS.APPROVED)
+    );
+    
+    const unsubscribeApproved = onSnapshot(approvedQuery, (benefSnapshot) => {
+      const allApprovedBeneficiaries = benefSnapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      }));
+      console.log('✅ Approved beneficiaries loaded:', allApprovedBeneficiaries);
+      setApprovedBeneficiaries(allApprovedBeneficiaries);
+    });
+
+    setLoading(false);
+
+    // Cleanup all listeners
+    return () => {
+      unsubscribeCampaigns();
+      unsubscribePending();
+      unsubscribeApproved();
+    };
+  }, [address]);
 
   const handleApproveBeneficiary = async (beneficiaryId) => {
     if (!db) {
@@ -318,9 +299,9 @@ export default function OrganizerDashboard() {
           onClose={() => setShowCreateModal(false)}
           onSuccess={() => {
             setShowCreateModal(false);
-            loadCampaigns();
+            // No need to reload - real-time listener will update automatically
           }}
-          organizerId={walletAddress}
+          organizerId={address}
         />
       )}
 
@@ -440,11 +421,65 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
   });
   const [loading, setLoading] = useState(false);
   const [txStatus, setTxStatus] = useState(''); // Status message for user
+  const [isApprovedOrganizer, setIsApprovedOrganizer] = useState(null); // null = checking, true/false = result
   const { data: walletClient } = useWalletClient();
   const { address } = useAccount();
 
+  // Check if organizer is approved on blockchain
+  const checkApproval = async () => {
+    if (!address) {
+      console.log('No address connected');
+      return;
+    }
+    
+    try {
+      console.log('Checking approval for address:', address);
+      console.log('CampaignFactory address:', CONTRACTS.campaignFactory);
+      
+      const client = getPublicClient(config);
+      
+      const isApproved = await client.readContract({
+        address: CONTRACTS.campaignFactory,
+        abi: CampaignFactoryABI.abi,
+        functionName: 'isApprovedOrganizer',
+        args: [address]
+      });
+      
+      console.log('Approval status:', isApproved);
+      setIsApprovedOrganizer(isApproved);
+    } catch (error) {
+      console.error('Error checking organizer approval:', error);
+      setIsApprovedOrganizer(false);
+    }
+  };
+  
+  useEffect(() => {
+    checkApproval();
+  }, [address]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Verify user is connected with their registered wallet
+    if (!address) {
+      alert('❌ No wallet connected. Please connect your MetaMask wallet.');
+      return;
+    }
+    
+    console.log('Connected wallet:', address);
+    console.log('Organizer ID from Firebase:', organizerId);
+    
+    // Check if organizer is approved
+    if (isApprovedOrganizer === false) {
+      alert('❌ Your wallet address is not approved as an organizer on the blockchain.\n\nConnected Wallet: ' + address + '\n\nPlease:\n1. Make sure you\'re connected with the correct wallet\n2. Contact admin to approve this address\n3. Click the Refresh button after approval');
+      return;
+    }
+    
+    if (isApprovedOrganizer === null) {
+      alert('⏳ Still checking organizer approval status. Please wait a moment and try again.');
+      return;
+    }
+    
     setLoading(true);
     setTxStatus('Preparing transaction...');
 
@@ -461,22 +496,91 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
       
       // Convert goal to wei (assuming goal is in USD, we'll use it as RELIEF tokens 1:1)
       const goalInWei = parseEther(formData.goal.toString());
+      
+      console.log('Creating campaign with params:');
+      console.log('- CampaignFactory address:', CONTRACTS.campaignFactory);
+      console.log('- Title:', formData.title);
+      console.log('- Description:', formData.description);
+      console.log('- Goal (RELIEF):', formData.goal);
+      console.log('- Goal (Wei):', goalInWei.toString());
+      console.log('- Location:', formData.location);
+      console.log('- Disaster Type:', formData.disasterType);
+      console.log('- Sender address:', address);
+      console.log('- Chain ID:', config.chains[0].id);
 
       // Call createCampaign on blockchain
       setTxStatus('Please sign the transaction in MetaMask...');
       
-      const tx = await campaignFactory.write.createCampaign([
-        formData.title,
-        formData.description,
-        goalInWei,
-        formData.location,
-        formData.disasterType
-      ]);
+      const publicClient = getPublicClient(config);
+      let tx;
+      try {
+        // First try to estimate gas to get better error messages
+        console.log('Estimating gas...');
+        try {
+          const gasEstimate = await publicClient.estimateContractGas({
+            address: CONTRACTS.campaignFactory,
+            abi: CampaignFactoryABI.abi,
+            functionName: 'createCampaign',
+            args: [
+              formData.title,
+              formData.description,
+              goalInWei,
+              formData.location,
+              formData.disasterType
+            ],
+            account: address,
+          });
+          console.log('Gas estimate:', gasEstimate);
+        } catch (estimateError) {
+          console.error('❌ Gas estimation failed!');
+          console.error('This means the transaction would revert.');
+          console.error('Estimate error:', estimateError);
+          if (estimateError.shortMessage) {
+            console.error('Short message:', estimateError.shortMessage);
+          }
+          if (estimateError.details) {
+            console.error('Details:', estimateError.details);
+          }
+          if (estimateError.metaMessages) {
+            console.error('Meta messages:', estimateError.metaMessages);
+          }
+          throw estimateError;
+        }
+
+        // Use walletClient.writeContract - let wallet estimate gas
+        console.log('Sending transaction...');
+        tx = await walletClient.writeContract({
+          address: CONTRACTS.campaignFactory,
+          abi: CampaignFactoryABI.abi,
+          functionName: 'createCampaign',
+          args: [
+            formData.title,
+            formData.description,
+            goalInWei,
+            formData.location,
+            formData.disasterType
+          ],
+          account: address,
+          // Let wallet estimate gas automatically
+        });
+        console.log('Transaction hash:', tx);
+      } catch (writeError) {
+        console.error('Contract write error:', writeError);
+        console.error('Error details:', {
+          message: writeError.message,
+          code: writeError.code,
+          data: writeError.data,
+          shortMessage: writeError.shortMessage
+        });
+        throw writeError;
+      }
 
       setTxStatus('Transaction submitted. Waiting for confirmation...');
       
       // Wait for transaction to be mined
-      const receipt = await walletClient.waitForTransactionReceipt({ hash: tx });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: tx });
+      
+      console.log('Transaction receipt:', receipt);
       
       // Extract campaign address from event logs
       let campaignAddress = null;
@@ -504,7 +608,7 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
 
       // Step 2: Save to Firebase with blockchain data
       if (db) {
-        await addDoc(collection(db, 'campaigns'), {
+        const campaignDoc = await addDoc(collection(db, 'campaigns'), {
           ...formData,
           goal: parseFloat(formData.goal),
           expectedBeneficiaries: parseInt(formData.expectedBeneficiaries),
@@ -520,6 +624,13 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
           chainId: 80002
         });
         
+        console.log('✅ Campaign saved to Firebase with ID:', campaignDoc.id);
+        console.log('📝 Campaign data:', {
+          title: formData.title,
+          organizerId: organizerId,
+          blockchainAddress: campaignAddress
+        });
+        
         alert(`✅ Campaign created successfully!\n\nBlockchain Address: ${campaignAddress}\n\nView on PolygonScan: ${getPolygonScanUrl(tx)}`);
         onSuccess();
       } else {
@@ -528,8 +639,26 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
       }
     } catch (error) {
       console.error('Error creating campaign:', error);
+      console.error('Error details:', {
+        message: error.message,
+        code: error.code,
+        data: error.data,
+        shortMessage: error.shortMessage,
+        metaMessages: error.metaMessages
+      });
+      
       const errorMessage = parseContractError(error);
-      alert(`Failed to create campaign: ${errorMessage}`);
+      
+      // Check for specific error types
+      if (error.message?.includes('user rejected')) {
+        alert('❌ Transaction was rejected by user');
+      } else if (error.message?.includes('insufficient funds')) {
+        alert('❌ Insufficient funds for gas fee\n\nPlease make sure you have enough POL tokens for gas.');
+      } else if (error.message?.includes('Not an approved organizer')) {
+        alert('❌ Your wallet is not approved as an organizer\n\nPlease contact admin to approve your wallet address.');
+      } else {
+        alert(`Failed to create campaign: ${errorMessage}\n\nCheck console for more details.`);
+      }
     } finally {
       setLoading(false);
       setTxStatus('');
@@ -545,6 +674,63 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">
               ×
             </button>
+          </div>
+          
+          {/* Organizer Approval Status */}
+          <div className="mt-4">
+            {isApprovedOrganizer === null && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between">
+                <div className="flex items-center">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-3"></div>
+                  <span className="text-blue-800 text-sm">Checking organizer approval status...</span>
+                </div>
+                <button
+                  onClick={checkApproval}
+                  className="text-blue-600 hover:text-blue-800 text-xs font-medium px-3 py-1 bg-blue-100 hover:bg-blue-200 rounded transition"
+                >
+                  Refresh
+                </button>
+              </div>
+            )}
+            {isApprovedOrganizer === true && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-center justify-between">
+                <div className="flex items-center">
+                  <svg className="w-5 h-5 text-green-600 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-green-800 text-sm font-medium">✓ You are an approved organizer on blockchain</span>
+                </div>
+                <button
+                  onClick={checkApproval}
+                  className="text-green-600 hover:text-green-800 text-xs font-medium px-3 py-1 bg-green-100 hover:bg-green-200 rounded transition"
+                >
+                  Refresh
+                </button>
+              </div>
+            )}
+            {isApprovedOrganizer === false && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-start flex-1">
+                    <svg className="w-5 h-5 text-red-600 mr-2 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                    <div className="flex-1">
+                      <p className="text-red-800 text-sm font-medium">⚠️ Not approved as organizer</p>
+                      <p className="text-red-700 text-xs mt-1">Your wallet address needs to be approved by the admin before you can create campaigns.</p>
+                      <p className="text-red-600 text-xs mt-1 font-mono bg-red-100 px-2 py-1 rounded break-all">{address}</p>
+                      <p className="text-red-600 text-xs mt-2 italic">Ask admin to approve this address on the blockchain.</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={checkApproval}
+                    className="text-red-600 hover:text-red-800 text-xs font-medium px-3 py-1 bg-red-100 hover:bg-red-200 rounded transition ml-2 flex-shrink-0"
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -745,7 +931,7 @@ function BeneficiaryCard({ beneficiary, campaign, onApprove, onReject, showActio
 
         {/* Wallet Address */}
         <div className="bg-white rounded-lg p-3 border border-gray-200 mt-4">
-          <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Stellar Wallet Address</span>
+          <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Polygon Wallet Address</span>
           <p className="text-gray-900 font-mono text-sm break-all">{beneficiary.id || beneficiary.walletAddress}</p>
         </div>
 
