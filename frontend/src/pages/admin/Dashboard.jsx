@@ -1,374 +1,517 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase/config';
 import { collection, doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { USER_STATUS, ROLES } from '../../firebase/constants';
-import { freighterService } from '../../services/freighterService';
+import { useAccount, useDisconnect, useWalletClient } from 'wagmi';
+import { getCampaignFactoryContract, parseContractError, CONTRACTS } from '../../services/polygonService';
+import { getPublicClient } from '@wagmi/core';
+import { config } from '../../config/wagmiConfig';
+import CampaignFactoryABI from '../../contracts/CampaignFactory.json';
+import deployment from '../../contracts/addresses.json';
 
 export default function AdminDashboard() {
-  const [pendingUsers, setPendingUsers] = useState([]);
-  const [allUsers, setAllUsers] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
   const [stats, setStats] = useState({
-    total: 0,
-    pending: 0,
-    approved: 0,
-    donors: 0,
+    totalUsers: 0,
+    pendingApprovals: 0,
+    activeCampaigns: 0,
+    totalDonations: 0,
     organizers: 0,
     beneficiaries: 0
   });
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('pending');
+  const { address } = useAccount();
+  const { disconnect } = useDisconnect();
+  const { data: walletClient } = useWalletClient();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    loadUsers();
+    loadData();
   }, []);
 
-  const loadUsers = async () => {
+  const loadData = async () => {
     if (!db) {
       // Demo mode
-      setPendingUsers([
-        { id: '1', name: 'John Doe', role: 'organizer', organization: 'Red Cross', status: 'pending' },
-        { id: '2', name: 'Jane Smith', role: 'beneficiary', status: 'pending' }
+      setUsers([
+        { id: '1', name: 'John Doe', email: 'john@example.com', role: 'organizer', status: 'pending', organization: 'Red Cross' },
+        { id: '2', name: 'Jane Smith', email: 'jane@example.com', role: 'beneficiary', status: 'approved' }
       ]);
-      setStats({ total: 2, pending: 2, approved: 0, donors: 0, organizers: 1, beneficiaries: 1 });
+      setCampaigns([
+        { id: '1', title: 'Relief Campaign', status: 'active', raised: 5000, goal: 10000 }
+      ]);
+      setStats({
+        totalUsers: 2,
+        pendingApprovals: 1,
+        activeCampaigns: 1,
+        totalDonations: 5000,
+        organizers: 1,
+        beneficiaries: 1
+      });
       setLoading(false);
       return;
     }
 
     try {
-      // Realtime listener for all users
+      // Realtime listener for users
       const usersRef = collection(db, 'users');
-      const unsubscribe = onSnapshot(usersRef, (snapshot) => {
-        const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const unsubscribeUsers = onSnapshot(usersRef, (snapshot) => {
+        const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setUsers(usersData);
 
-        const pending = users.filter(u => u.status === USER_STATUS.PENDING);
-        setPendingUsers(pending);
-        setAllUsers(users);
+        const pending = usersData.filter(u => u.status === USER_STATUS.PENDING).length;
+        const organizers = usersData.filter(u => u.role === ROLES.ORGANIZER && u.status === USER_STATUS.APPROVED).length;
+        const beneficiaries = usersData.filter(u => u.role === ROLES.BENEFICIARY && u.status === USER_STATUS.APPROVED).length;
 
-        // Calculate stats in realtime
-        setStats({
-          total: users.length,
-          pending: pending.length,
-          approved: users.filter(u => u.status === USER_STATUS.APPROVED).length,
-          donors: users.filter(u => u.role === ROLES.DONOR).length,
-          organizers: users.filter(u => u.role === ROLES.ORGANIZER).length,
-          beneficiaries: users.filter(u => u.role === ROLES.BENEFICIARY).length
-        });
+        setStats(prev => ({
+          ...prev,
+          totalUsers: usersData.length,
+          pendingApprovals: pending,
+          organizers,
+          beneficiaries
+        }));
+      });
+
+      // Realtime listener for campaigns
+      const campaignsRef = collection(db, 'campaigns');
+      const unsubscribeCampaigns = onSnapshot(campaignsRef, (snapshot) => {
+        const campaignsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setCampaigns(campaignsData);
+
+        const active = campaignsData.filter(c => c.status === 'active').length;
+        const totalRaised = campaignsData.reduce((sum, c) => sum + (c.raised || 0), 0);
+
+        setStats(prev => ({
+          ...prev,
+          activeCampaigns: active,
+          totalDonations: totalRaised
+        }));
       });
 
       setLoading(false);
 
-      // Cleanup listener on unmount
-      return () => unsubscribe();
+      return () => {
+        unsubscribeUsers();
+        unsubscribeCampaigns();
+      };
     } catch (error) {
-      console.error('Error loading users:', error);
+      console.error('Error loading data:', error);
       setLoading(false);
     }
   };
 
-  const handleApprove = async (userId) => {
-    if (!db) {
-      alert('Demo mode - Firebase not configured');
-      return;
-    }
+  const handleDisconnect = () => {
+    disconnect();
+    navigate('/');
+  };
 
+  const scrollToSection = (sectionId) => {
+    navigate('/', { state: { scrollTo: sectionId } });
+  };
+
+  const handleApproveUser = async (userId) => {
     try {
-      await updateDoc(doc(db, 'users', userId), {
-        status: USER_STATUS.APPROVED,
-        updatedAt: new Date().toISOString()
-      });
-      alert('User approved successfully!');
-      loadUsers();
+      const user = users.find(u => u.id === userId);
+      console.log('Approving user:', user);
+      console.log('Admin wallet connected:', address);
+      
+      // If user is an organizer, check blockchain status FIRST before updating Firebase
+      if (user?.role === ROLES.ORGANIZER && user?.walletAddress && walletClient) {
+        try {
+          console.log('Checking blockchain approval for organizer:', user.walletAddress);
+          console.log('Using admin wallet:', address);
+          
+          const publicClient = getPublicClient(config);
+          
+          // First check if already approved on blockchain
+          console.log('Checking if already approved on blockchain...');
+          const isAlreadyApproved = await publicClient.readContract({
+            address: CONTRACTS.campaignFactory,
+            abi: CampaignFactoryABI.abi,
+            functionName: 'isApprovedOrganizer',
+            args: [user.walletAddress]
+          });
+          
+          if (isAlreadyApproved) {
+            console.log('✅ Organizer already approved on blockchain');
+            
+            // Update Firebase status to approved
+            await updateDoc(doc(db, 'users', userId), {
+              status: USER_STATUS.APPROVED
+            });
+            
+            alert(`✅ User approved successfully!\n\n✓ This organizer is already approved on blockchain and can create campaigns:\n${user.walletAddress}`);
+            return;
+          }
+          
+          console.log('Organizer not yet approved on blockchain, will approve now...');
+          
+          // Try to estimate gas first to get better error messages
+          console.log('Estimating gas for approval...');
+          const campaignFactory = getCampaignFactoryContract(walletClient);
+          
+          try {
+            const gasEstimate = await publicClient.estimateContractGas({
+              address: CONTRACTS.campaignFactory,
+              abi: CampaignFactoryABI.abi,
+              functionName: 'approveOrganizer',
+              args: [user.walletAddress],
+              account: address
+            });
+            console.log('Gas estimate:', gasEstimate);
+          } catch (estimateError) {
+            console.error('❌ Gas estimation failed!');
+            console.error('Estimate error:', estimateError);
+            if (estimateError.shortMessage) {
+              console.error('Short message:', estimateError.shortMessage);
+            }
+            if (estimateError.details) {
+              console.error('Details:', estimateError.details);
+            }
+            if (estimateError.cause) {
+              console.error('Cause:', estimateError.cause);
+            }
+            throw new Error('Transaction would fail: ' + (estimateError.shortMessage || estimateError.message));
+          }
+          
+          console.log('Sending approval transaction...');
+          const tx = await campaignFactory.write.approveOrganizer(
+            [user.walletAddress],
+            {
+              account: address,
+            }
+          );
+          
+          console.log('Approval transaction hash:', tx);
+          console.log('Waiting for confirmation...');
+          const receipt = await publicClient.waitForTransactionReceipt({ hash: tx });
+          console.log('Organizer approved on blockchain!', receipt);
+          
+          // Update Firebase AFTER successful blockchain approval
+          await updateDoc(doc(db, 'users', userId), {
+            status: USER_STATUS.APPROVED
+          });
+          
+          alert(`✅ User approved successfully!\n\nOrganizer approved on blockchain:\n${user.walletAddress}\n\nTx: ${tx.slice(0, 10)}...`);
+        } catch (blockchainError) {
+          console.error('Blockchain approval error:', blockchainError);
+          console.error('Error details:', {
+            message: blockchainError.message,
+            shortMessage: blockchainError.shortMessage,
+            details: blockchainError.details,
+            metaMessages: blockchainError.metaMessages
+          });
+          
+          const errorMsg = parseContractError(blockchainError);
+          alert(`⚠️ Blockchain approval failed: ${errorMsg}\n\nPlease make sure:\n1. You're connected with the admin wallet (${deployment.deployer})\n2. You have enough POL for gas\n3. You're on Polygon Amoy network\n\nThe organizer was NOT approved.`);
+          throw blockchainError; // Don't update Firebase if blockchain fails
+        }
+      } else {
+        // For non-organizers, just update Firebase
+        await updateDoc(doc(db, 'users', userId), {
+          status: USER_STATUS.APPROVED
+        });
+        if (user?.role === ROLES.ORGANIZER && !user?.walletAddress) {
+          console.warn('Organizer has no wallet address');
+          alert('✅ User approved successfully!\n\n⚠️ Note: This organizer has no wallet address stored.');
+        } else if (user?.role === ROLES.ORGANIZER && !walletClient) {
+          console.warn('Admin wallet not connected');
+          alert('✅ User approved successfully!\n\n⚠️ Note: Admin wallet not connected. Organizer not approved on blockchain.');
+        } else {
+          alert('User approved successfully!');
+        }
+      }
     } catch (error) {
       console.error('Error approving user:', error);
       alert('Failed to approve user');
     }
   };
 
-  const handleReject = async (userId) => {
-    if (!db) {
-      alert('Demo mode - Firebase not configured');
-      return;
-    }
-
+  const handleRejectUser = async (userId) => {
     try {
       await updateDoc(doc(db, 'users', userId), {
-        status: USER_STATUS.REJECTED,
-        updatedAt: new Date().toISOString()
+        status: USER_STATUS.REJECTED
       });
       alert('User rejected');
-      loadUsers();
     } catch (error) {
       console.error('Error rejecting user:', error);
       alert('Failed to reject user');
     }
   };
 
+  const handlePauseCampaign = async (campaignId) => {
+    try {
+      await updateDoc(doc(db, 'campaigns', campaignId), {
+        status: 'paused'
+      });
+      alert('Campaign paused');
+    } catch (error) {
+      console.error('Error pausing campaign:', error);
+      alert('Failed to pause campaign');
+    }
+  };
+
+  const handleResumeCampaign = async (campaignId) => {
+    try {
+      await updateDoc(doc(db, 'campaigns', campaignId), {
+        status: 'active'
+      });
+      alert('Campaign resumed');
+    } catch (error) {
+      console.error('Error resuming campaign:', error);
+      alert('Failed to resume campaign');
+    }
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-indigo-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading dashboard...</p>
-        </div>
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-green-500"></div>
       </div>
     );
   }
 
+  const pendingUsers = users.filter(u => u.status === USER_STATUS.PENDING);
+  const approvedUsers = users.filter(u => u.status === USER_STATUS.APPROVED);
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <h1 className="text-4xl font-bold mb-2">Super Admin Dashboard</h1>
-          <p className="text-indigo-100">Manage users and oversee platform operations</p>
-        </div>
+    <div className="min-h-screen h-screen bg-black relative overflow-hidden">
+      {/* Animated Background Effects */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {/* Round Green Glowing Orbs */}
+        <div className="absolute top-10 left-10 w-72 h-72 bg-green-500/15 rounded-full blur-3xl"></div>
+        <div className="absolute top-12 right-12 w-80 h-80 bg-green-500/18 rounded-full blur-3xl"></div>
+        <div className="absolute top-20 right-16 w-64 h-64 bg-emerald-500/12 rounded-full blur-3xl"></div>
+        <div className="absolute bottom-32 left-52 w-80 h-80 bg-green-400/15 rounded-full blur-3xl"></div>
+        <div className="absolute bottom-10 right-10 w-72 h-72 bg-emerald-500/15 rounded-full blur-3xl"></div>
+        <div className="absolute top-1/3 right-1/3 w-64 h-64 bg-green-500/10 rounded-full blur-3xl"></div>
+        
+        {/* 100 Small Round Floating Dots */}
+        {[...Array(100)].map((_, i) => (
+          <div
+            key={i}
+            className="absolute rounded-full bg-white animate-float"
+            style={{
+              width: '3px',
+              height: '3px',
+              left: `${Math.random() * 100}%`,
+              top: `${Math.random() * 100}%`,
+              opacity: Math.random() * 0.2 + 0.05,
+              animationDuration: `${Math.random() * 8 + 5}s`,
+              animationDelay: `${Math.random() * 5}s`,
+            }}
+          />
+        ))}
       </div>
 
-      {/* Stats */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6 mb-8">
-          <StatCard title="Total Users" value={stats.total} icon="👥" color="bg-blue-500" />
-          <StatCard title="Pending" value={stats.pending} icon="⏳" color="bg-yellow-500" />
-          <StatCard title="Approved" value={stats.approved} icon="✅" color="bg-green-500" />
-          <StatCard title="Donors" value={stats.donors} icon="💝" color="bg-emerald-500" />
-          <StatCard title="Organizers" value={stats.organizers} icon="🏢" color="bg-indigo-500" />
-          <StatCard title="Beneficiaries" value={stats.beneficiaries} icon="🤝" color="bg-purple-500" />
-        </div>
-
-        {/* Tabs */}
-        <div className="bg-white rounded-lg shadow mb-8">
-          <div className="border-b">
-            <nav className="flex -mb-px">
-              <button
-                onClick={() => setActiveTab('pending')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
-                  activeTab === 'pending'
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Pending Approvals ({pendingUsers.length})
-              </button>
-              <button
-                onClick={() => setActiveTab('all')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
-                  activeTab === 'all'
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                All Users ({allUsers.length})
-              </button>
-            </nav>
+      {/* Navbar */}
+      <div className="fixed top-[25px] left-0 right-0 z-50 py-4 pointer-events-none px-4">
+        <nav className="flex max-w-4xl mx-auto border border-white/20 rounded-3xl bg-white/10 backdrop-blur-md shadow-[0px_2px_3px_-1px_rgba(0,0,0,0.1),0px_1px_0px_0px_rgba(255,255,255,0.1),0px_0px_0px_1px_rgba(255,255,255,0.05)] px-4 py-2 items-center justify-between gap-[3px] relative pointer-events-auto">
+          <div className="absolute inset-0 -z-10 bg-gradient-to-r from-white/5 via-gray-100/10 to-white/5 rounded-3xl pointer-events-none"></div>
+          
+          {/* Logo */}
+          <div className="flex items-center space-x-2 w-[150px] ml-[5px]">
+            <div className="bg-gradient-to-r from-green-500 to-emerald-500 p-2 rounded-full w-8 h-8 flex items-center justify-center">
+              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" />
+              </svg>
+            </div>
+            <span className="text-xl font-semibold text-white">Relifo</span>
           </div>
 
-          {/* Content */}
-          <div className="p-6">
-            {activeTab === 'pending' && (
-              <div className="space-y-4">
-                {pendingUsers.length === 0 ? (
-                  <div className="text-center py-12">
-                    <span className="text-6xl mb-4 block">🎉</span>
-                    <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                      All caught up!
-                    </h3>
-                    <p className="text-gray-600">No pending approvals at the moment</p>
+          {/* Nav Links */}
+          <div className="flex items-center space-x-5 -ml-[10px] relative z-10">
+            <button onClick={() => navigate('/')} className="relative text-white hover:text-white/80 items-center flex space-x-1 transition cursor-pointer">
+              <span className="hidden sm:block text-base text-white font-medium">Home</span>
+            </button>
+            <button onClick={() => scrollToSection('about')} className="relative text-white hover:text-white/80 items-center flex space-x-1 transition cursor-pointer">
+              <span className="hidden sm:block text-base text-white font-medium">About</span>
+            </button>
+            <button className="relative text-white hover:text-white/80 items-center flex space-x-1 transition cursor-pointer">
+              <span className="hidden sm:block text-base text-white font-medium">Admin</span>
+            </button>
+          </div>
+
+          {/* Disconnect Button */}
+          <div className="flex items-center space-x-2 relative z-10">
+            <button
+              onClick={handleDisconnect}
+              className="group relative flex cursor-pointer items-center justify-center whitespace-nowrap border border-white/10 px-6 py-3 text-white bg-black rounded-[100px] transform-gpu transition-transform duration-300 ease-in-out active:translate-y-px w-[150px] overflow-visible"
+            >
+              <div className="pointer-events-none absolute inset-0 rounded-[inherit] border border-transparent [mask-clip:padding-box,border-box] [mask-composite:intersect] [mask-image:linear-gradient(transparent,transparent),linear-gradient(#000,#000)]">
+                <div className="absolute aspect-square bg-gradient-to-l from-[#10b981] to-transparent animate-border-orbit opacity-90" style={{width: '51px', offsetPath: 'rect(0px auto auto 0px round 40px)'}}></div>
+              </div>
+              <span className="relative z-20">Disconnect</span>
+              <div className="pointer-events-none insert-0 absolute size-full rounded-2xl px-4 py-1.5 text-sm font-medium shadow-[inset_0_-8px_10px_#ffffff1f] transform-gpu transition-all duration-300 ease-in-out group-hover:shadow-[inset_0_-6px_10px_#ffffff3f] group-active:shadow-[inset_0_-10px_10px_#ffffff3f]"></div>
+              <div className="pointer-events-none absolute -z-10 bg-black rounded-[100px] inset-[0.05em]"></div>
+            </button>
+          </div>
+        </nav>
+      </div>
+
+      {/* Main Content */}
+      <div className="relative z-10 h-full flex flex-col pt-36 pb-4 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto overflow-hidden">
+        {/* Top Row - Platform Stats */}
+        <div className="grid md:grid-cols-3 gap-4 mb-4 flex-shrink-0">
+          {/* Total Users Card */}
+          <div className="glass-card border border-white/20 rounded-3xl p-5 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all h-[140px] flex flex-col">
+            <h2 className="text-lg font-semibold text-white mb-2">Platform Overview</h2>
+            <div className="space-y-1">
+              <p className="text-white/80 text-sm">Total Users: <span className="text-green-400 font-semibold">{stats.totalUsers}</span></p>
+              <p className="text-white/80 text-sm">Organizers: <span className="text-green-400 font-semibold">{stats.organizers}</span></p>
+              <p className="text-white/80 text-sm">Beneficiaries: <span className="text-green-400 font-semibold">{stats.beneficiaries}</span></p>
+            </div>
+          </div>
+
+          {/* Campaigns Card */}
+          <div className="glass-card border border-white/20 rounded-3xl p-5 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all h-[140px] flex flex-col">
+            <h2 className="text-lg font-semibold text-white mb-2">Campaigns</h2>
+            <div className="space-y-1">
+              <p className="text-white/80 text-sm">Active: <span className="text-green-400 font-semibold">{stats.activeCampaigns}</span></p>
+              <p className="text-white/80 text-sm">Total Raised: <span className="text-green-400 font-semibold">{stats.totalDonations.toFixed(1)} RELIEF</span></p>
+            </div>
+          </div>
+
+          {/* Pending Approvals Card */}
+          <div className="glass-card border border-white/20 rounded-3xl p-5 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all h-[140px] flex flex-col">
+            <h2 className="text-lg font-semibold text-white mb-2">Pending Approvals</h2>
+            <p className="text-4xl font-bold text-green-400 mt-2">{stats.pendingApprovals}</p>
+            <p className="text-white/60 text-xs mt-1">Users awaiting approval</p>
+          </div>
+        </div>
+
+        {/* Pending User Approvals */}
+        <div className="glass-card border border-white/20 rounded-3xl p-5 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all mb-4 flex-shrink-0 overflow-hidden h-[200px] flex flex-col">
+          <h2 className="text-xl font-semibold text-white mb-4 flex-shrink-0">Pending User Approvals</h2>
+          <div className="overflow-y-auto custom-scrollbar flex-1">
+            {pendingUsers.length === 0 ? (
+              <p className="text-white/40 text-center py-8">No pending approvals</p>
+            ) : (
+              <div className="space-y-2">
+                {pendingUsers.map(user => (
+                  <div key={user.id} className="glass-card border border-white/10 rounded-2xl p-3 bg-white/5 hover:bg-white/10 transition-all">
+                    <div className="flex justify-between items-center">
+                      <div className="flex-1">
+                        <h3 className="text-white font-semibold text-sm">{user.name || user.email}</h3>
+                        <p className="text-white/60 text-xs">Role: {user.role}</p>
+                        {user.organization && <p className="text-white/60 text-xs">Org: {user.organization}</p>}
+                        {user.walletAddress && <p className="text-green-400 text-xs font-mono">{user.walletAddress.slice(0, 6)}...{user.walletAddress.slice(-4)}</p>}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleApproveUser(user.id)}
+                          className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-3 py-1 rounded-xl text-xs font-semibold hover:shadow-lg hover:shadow-green-500/50 transition-all"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleRejectUser(user.id)}
+                          className="bg-gradient-to-r from-red-600 to-red-700 text-white px-3 py-1 rounded-xl text-xs font-semibold hover:shadow-lg hover:shadow-red-500/50 transition-all"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  pendingUsers.map(user => (
-                    <UserCard key={user.id} user={user} onApprove={handleApprove} onReject={handleReject} />
-                  ))
-                )}
+                ))}
               </div>
             )}
+          </div>
+        </div>
 
-            {activeTab === 'all' && (
-              <div className="space-y-4">
-                {allUsers.map(user => (
-                  <UserCard key={user.id} user={user} showActions={false} />
+        {/* All Campaigns Management */}
+        <div className="glass-card border border-white/20 rounded-3xl p-5 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all flex-shrink-0 overflow-hidden h-[200px] flex flex-col">
+          <h2 className="text-xl font-semibold text-white mb-4 flex-shrink-0">Campaign Management</h2>
+          <div className="overflow-y-auto custom-scrollbar flex-1">
+            {campaigns.length === 0 ? (
+              <p className="text-white/40 text-center py-8">No campaigns yet</p>
+            ) : (
+              <div className="space-y-2">
+                {campaigns.map(campaign => (
+                  <div key={campaign.id} className="glass-card border border-white/10 rounded-2xl p-3 bg-white/5 hover:bg-white/10 transition-all">
+                    <div className="flex justify-between items-center">
+                      <div className="flex-1">
+                        <h3 className="text-white font-semibold text-sm">{campaign.title}</h3>
+                        <p className="text-white/60 text-xs">
+                          Status: <span className={`${campaign.status === 'active' ? 'text-green-400' : 'text-yellow-400'}`}>{campaign.status}</span> | 
+                          Raised: {campaign.raised?.toFixed(1) || 0} / {campaign.goal?.toFixed(1) || 0} RELIEF
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        {campaign.status === 'active' ? (
+                          <button
+                            onClick={() => handlePauseCampaign(campaign.id)}
+                            className="bg-gradient-to-r from-yellow-600 to-orange-600 text-white px-3 py-1 rounded-xl text-xs font-semibold hover:shadow-lg hover:shadow-yellow-500/50 transition-all"
+                          >
+                            Pause
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleResumeCampaign(campaign.id)}
+                            className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-3 py-1 rounded-xl text-xs font-semibold hover:shadow-lg hover:shadow-green-500/50 transition-all"
+                          >
+                            Resume
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
           </div>
         </div>
       </div>
-    </div>
-  );
-}
 
-function StatCard({ title, value, icon, color }) {
-  return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-2xl">{icon}</span>
-        <span className={`${color} text-white px-2 py-1 rounded text-sm font-bold`}>
-          {value}
-        </span>
-      </div>
-      <h3 className="text-gray-600 text-sm font-medium">{title}</h3>
-    </div>
-  );
-}
-
-function UserCard({ user, onApprove, onReject, showActions = true }) {
-  const getRoleBadge = (role) => {
-    const badges = {
-      [ROLES.DONOR]: { color: 'bg-green-100 text-green-700', icon: '💝' },
-      [ROLES.ORGANIZER]: { color: 'bg-blue-100 text-blue-700', icon: '🏢' },
-      [ROLES.BENEFICIARY]: { color: 'bg-purple-100 text-purple-700', icon: '🤝' }
-    };
-    return badges[role] || badges[ROLES.DONOR];
-  };
-
-  const getStatusBadge = (status) => {
-    const badges = {
-      [USER_STATUS.PENDING]: 'bg-yellow-100 text-yellow-700',
-      [USER_STATUS.APPROVED]: 'bg-green-100 text-green-700',
-      [USER_STATUS.REJECTED]: 'bg-red-100 text-red-700'
-    };
-    return badges[status] || badges[USER_STATUS.PENDING];
-  };
-
-  const badge = getRoleBadge(user.role);
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  return (
-    <div className="border-2 border-gray-200 rounded-xl p-6 hover:shadow-lg transition-all bg-white">
-      {/* Header with Role and Status */}
-      <div className="flex items-start justify-between mb-6 pb-4 border-b-2 border-gray-100">
-        <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2">
-            <h3 className="text-2xl font-bold text-gray-900">{user.name}</h3>
-            <span className={`px-4 py-1.5 rounded-full text-sm font-bold ${badge.color}`}>
-              {badge.icon} {user.role.toUpperCase()}
-            </span>
-          </div>
-          <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${getStatusBadge(user.status)}`}>
-            Status: {user.status.toUpperCase()}
-          </span>
-        </div>
-      </div>
-
-      {/* Application Details */}
-      <div className="bg-gray-50 rounded-lg p-5 mb-4">
-        <h4 className="font-bold text-gray-900 mb-3 text-lg flex items-center gap-2">
-          <svg className="w-5 h-5 text-indigo-600" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
-            <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd"/>
-          </svg>
-          Application Details
-        </h4>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Email */}
-          <div className="bg-white rounded-lg p-3 border border-gray-200">
-            <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Email Address</span>
-            <p className="text-gray-900 font-medium">{user.email}</p>
-          </div>
-
-          {/* Organization */}
-          {user.organization && (
-            <div className="bg-white rounded-lg p-3 border border-gray-200">
-              <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Organization</span>
-              <p className="text-gray-900 font-medium">{user.organization}</p>
-            </div>
-          )}
-
-          {/* Application Date */}
-          <div className="bg-white rounded-lg p-3 border border-gray-200">
-            <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Applied On</span>
-            <p className="text-gray-900 font-medium">{formatDate(user.createdAt)}</p>
-          </div>
-
-          {/* Last Updated */}
-          {user.updatedAt && (
-            <div className="bg-white rounded-lg p-3 border border-gray-200">
-              <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Last Updated</span>
-              <p className="text-gray-900 font-medium">{formatDate(user.updatedAt)}</p>
-            </div>
-          )}
-        </div>
-
-        {/* Wallet Address */}
-        <div className="bg-white rounded-lg p-3 border border-gray-200 mt-4">
-          <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Stellar Wallet Address</span>
-          <p className="text-gray-900 font-mono text-sm break-all">{user.id || user.walletAddress}</p>
-        </div>
-
-        {/* Description/Reason */}
-        {user.description && (
-          <div className="bg-white rounded-lg p-4 border border-gray-200 mt-4">
-            <span className="text-xs font-semibold text-gray-500 uppercase block mb-2">
-              Why They Need This Role
-            </span>
-            <p className="text-gray-900 leading-relaxed">{user.description}</p>
-          </div>
-        )}
-
-        {/* Verification Document */}
-        {user.documentUrl && (
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-200 mt-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="bg-blue-500 text-white rounded-lg p-3">
-                  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <div>
-                  <span className="text-xs font-semibold text-blue-700 uppercase block">Verification Document</span>
-                  <p className="text-sm text-blue-900 font-medium">PDF Document Uploaded</p>
-                </div>
-              </div>
-              <a
-                href={user.documentUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-bold transition-all shadow-md hover:shadow-lg flex items-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-                VIEW DOCUMENT
-              </a>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Action Buttons */}
-      {showActions && user.status === USER_STATUS.PENDING && (
-        <div className="flex gap-3 pt-4 border-t-2 border-gray-100">
-          <button
-            onClick={() => onApprove(user.id)}
-            className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white py-4 rounded-lg font-bold text-lg transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
-          >
-            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-            </svg>
-            APPROVE APPLICATION
-          </button>
-          <button
-            onClick={() => onReject(user.id)}
-            className="flex-1 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white py-4 rounded-lg font-bold text-lg transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
-          >
-            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-            </svg>
-            REJECT APPLICATION
-          </button>
-        </div>
-      )}
+      {/* Custom Styles */}
+      <style>{`
+        @keyframes float {
+          0%, 100% {
+            transform: translateY(0) translateX(0);
+          }
+          25% {
+            transform: translateY(-20px) translateX(5px);
+          }
+          50% {
+            transform: translateY(-40px) translateX(-5px);
+          }
+          75% {
+            transform: translateY(-20px) translateX(5px);
+          }
+        }
+        .animate-float {
+          animation: float linear infinite;
+        }
+        @keyframes border-orbit {
+          0% {
+            offset-distance: 0%;
+          }
+          100% {
+            offset-distance: 100%;
+          }
+        }
+        .animate-border-orbit {
+          animation: border-orbit 3s linear infinite;
+        }
+        .glass-card {
+          box-shadow: 0 8px 32px 0 rgba(16, 185, 129, 0.15);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(16, 185, 129, 0.5);
+          border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(16, 185, 129, 0.7);
+        }
+      `}</style>
     </div>
   );
 }
