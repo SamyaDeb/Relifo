@@ -24,6 +24,12 @@ contract CampaignFactory is Ownable, ReentrancyGuard {
     /// @notice Mapping to check if address is an approved organizer
     mapping(address => bool) public approvedOrganizers;
     
+    /// @notice Mapping to check if address is a verified merchant
+    mapping(address => bool) public verifiedMerchants;
+    
+    /// @notice Array of all verified merchant addresses
+    address[] public merchants;
+    
     /// @notice Mapping to check if address is a campaign
     mapping(address => bool) public isCampaign;
     
@@ -44,6 +50,12 @@ contract CampaignFactory is Ownable, ReentrancyGuard {
     
     /// @notice Event emitted when organizer is revoked
     event OrganizerRevoked(address indexed organizer, uint256 timestamp);
+    
+    /// @notice Event emitted when merchant is verified
+    event MerchantVerified(address indexed merchant, uint256 timestamp);
+    
+    /// @notice Event emitted when merchant verification is revoked
+    event MerchantRevoked(address indexed merchant, uint256 timestamp);
 
     /**
      * @dev Constructor
@@ -106,6 +118,7 @@ contract CampaignFactory is Ownable, ReentrancyGuard {
             msg.sender,      // organizer
             owner(),         // admin (super admin)
             reliefToken,     // RELIEF token address
+            address(this),   // factory address
             title,
             description,
             goalAmount,
@@ -159,6 +172,49 @@ contract CampaignFactory is Ownable, ReentrancyGuard {
 
     /**
      * @notice Check if address is approved organizer
+
+    /**
+     * @notice Verify a merchant (Super Admin only)
+     * @dev Only owner (super admin) can verify merchants
+     * @param merchant Address of merchant to verify
+     */
+    function verifyMerchant(address merchant) external onlyOwner {
+        require(merchant != address(0), "CampaignFactory: Invalid merchant address");
+        require(!verifiedMerchants[merchant], "CampaignFactory: Already verified");
+        
+        verifiedMerchants[merchant] = true;
+        merchants.push(merchant);
+        emit MerchantVerified(merchant, block.timestamp);
+    }
+
+    /**
+     * @notice Revoke merchant verification
+     * @dev Only owner can revoke
+     * @param merchant Address of merchant to revoke
+     */
+    function revokeMerchant(address merchant) external onlyOwner {
+        require(verifiedMerchants[merchant], "CampaignFactory: Not a verified merchant");
+        
+        verifiedMerchants[merchant] = false;
+        emit MerchantRevoked(merchant, block.timestamp);
+    }
+
+    /**
+     * @notice Check if address is verified merchant
+     * @param merchant Address to check
+     * @return True if verified
+     */
+    function isVerifiedMerchant(address merchant) external view returns (bool) {
+        return verifiedMerchants[merchant];
+    }
+
+    /**
+     * @notice Get all verified merchants
+     * @return Array of verified merchant addresses
+     */
+    function getAllVerifiedMerchants() external view returns (address[] memory) {
+        return merchants;
+    }
      * @param organizer Address to check
      * @return True if approved
      */

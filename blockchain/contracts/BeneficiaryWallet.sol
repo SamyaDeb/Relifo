@@ -6,6 +6,14 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
+ * @title ICampaignFactory
+ * @dev Interface for CampaignFactory to check merchant verification
+ */
+interface ICampaignFactory {
+    function isVerifiedMerchant(address merchant) external view returns (bool);
+}
+
+/**
  * @title BeneficiaryWallet
  * @dev Wallet with spending restrictions for disaster relief beneficiaries
  * @notice Allows beneficiaries to spend funds with category-based limits
@@ -35,6 +43,9 @@ contract BeneficiaryWallet is ReentrancyGuard, Pausable {
     
     /// @notice Campaign organizer (can approve merchants and set limits)
     address public organizer;
+    
+    /// @notice Campaign factory for merchant verification
+    address public factory;
     
     /// @notice Array of all spending records
     Spending[] public spendingHistory;
@@ -117,22 +128,26 @@ contract BeneficiaryWallet is ReentrancyGuard, Pausable {
      * @param _reliefToken RELIEF token address
      * @param _campaign Campaign contract address
      * @param _organizer Campaign organizer address
+     * @param _factory Campaign factory address for merchant verification
      */
     constructor(
         address _beneficiary,
         address _reliefToken,
         address _campaign,
-        address _organizer
+        address _organizer,
+        address _factory
     ) {
         require(_beneficiary != address(0), "BeneficiaryWallet: Invalid beneficiary");
         require(_reliefToken != address(0), "BeneficiaryWallet: Invalid token");
         require(_campaign != address(0), "BeneficiaryWallet: Invalid campaign");
         require(_organizer != address(0), "BeneficiaryWallet: Invalid organizer");
+        require(_factory != address(0), "BeneficiaryWallet: Invalid factory");
         
         beneficiary = _beneficiary;
         reliefToken = IERC20(_reliefToken);
         campaign = _campaign;
         organizer = _organizer;
+        factory = _factory;
         
         // Set default category limits (can be updated by organizer)
         categoryLimits[SpendingCategory.Food] = 1000 * 10**18;       // 1000 RELIEF
@@ -194,7 +209,7 @@ contract BeneficiaryWallet is ReentrancyGuard, Pausable {
 
     /**
      * @notice Approve merchant for specific category
-     * @dev Only organizer can approve merchants
+     * @dev Only organizer can approve merchants. Merchant must be verified by admin first.
      * @param merchant Merchant address
      * @param category Spending category
      */
@@ -204,6 +219,12 @@ contract BeneficiaryWallet is ReentrancyGuard, Pausable {
     {
         require(merchant != address(0), "BeneficiaryWallet: Invalid merchant");
         require(!approvedMerchants[merchant][category], "BeneficiaryWallet: Already approved");
+        
+        // Check if merchant is verified by admin in factory
+        require(
+            ICampaignFactory(factory).isVerifiedMerchant(merchant),
+            "BeneficiaryWallet: Merchant not verified by admin"
+        );
         
         approvedMerchants[merchant][category] = true;
         

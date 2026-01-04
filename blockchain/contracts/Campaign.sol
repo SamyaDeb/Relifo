@@ -51,6 +51,9 @@ contract Campaign is ReentrancyGuard, Pausable {
     /// @notice RELIEF token contract
     IERC20 public reliefToken;
     
+    /// @notice Campaign factory contract
+    address public factory;
+    
     /// @notice Array of all donations
     Donation[] public donations;
     
@@ -128,6 +131,7 @@ contract Campaign is ReentrancyGuard, Pausable {
      * @param _organizer Campaign organizer address
      * @param _admin Super admin address
      * @param _reliefToken RELIEF token address
+     * @param _factory Campaign factory address
      * @param _title Campaign title
      * @param _description Campaign description
      * @param _goalAmount Target amount to raise
@@ -138,6 +142,7 @@ contract Campaign is ReentrancyGuard, Pausable {
         address _organizer,
         address _admin,
         address _reliefToken,
+        address _factory,
         string memory _title,
         string memory _description,
         uint256 _goalAmount,
@@ -147,9 +152,11 @@ contract Campaign is ReentrancyGuard, Pausable {
         require(_organizer != address(0), "Campaign: Invalid organizer");
         require(_admin != address(0), "Campaign: Invalid admin");
         require(_reliefToken != address(0), "Campaign: Invalid token");
+        require(_factory != address(0), "Campaign: Invalid factory");
         require(_goalAmount > 0, "Campaign: Invalid goal amount");
         
         reliefToken = IERC20(_reliefToken);
+        factory = _factory;
         
         campaignInfo = CampaignInfo({
             title: _title,
@@ -224,7 +231,8 @@ contract Campaign is ReentrancyGuard, Pausable {
         
         // Create beneficiary wallet if doesn't exist
         if (beneficiaryWallets[beneficiary] == address(0)) {
-            BeneficiaryWallet wallet = new BeneficiaryWallet(
+            BeneficiaryWallet wallet =,
+                factory new BeneficiaryWallet(
                 beneficiary,
                 address(reliefToken),
                 address(this),
