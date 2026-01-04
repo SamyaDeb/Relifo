@@ -150,7 +150,6 @@ export default function AdminDashboard() {
           // Try to estimate gas first to get better error messages
           console.log('Estimating gas for approval...');
           const campaignFactory = getCampaignFactoryContract(walletClient);
-          const publicClient = getPublicClient(config, { chainId: 80002 });
           
           try {
             const gasEstimate = await publicClient.estimateContractGas({
