@@ -37,8 +37,8 @@ export default function PendingApproval() {
         }
         
         if (db) {
-          // Real-time listener for approval status
-          unsubscribe = onSnapshot(doc(db, 'users', address), async (snapshot) => {
+          // Real-time listener for approval status (using lowercase for case-insensitive lookup)
+          unsubscribe = onSnapshot(doc(db, 'users', address.toLowerCase()), async (snapshot) => {
             if (snapshot.exists()) {
               const data = snapshot.data();
               setUserData(data);

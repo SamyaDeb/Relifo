@@ -4,6 +4,9 @@ import { parseEther, formatEther } from 'viem';
 import polygonService from '../services/polygonService';
 import { doc, updateDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase/config';
+import { getPublicClient } from '@wagmi/core';
+import { config } from '../config/wagmiConfig';
+import CampaignABI from '../contracts/Campaign.json';
 
 export default function AllocateFundsModal({ campaign, beneficiaries, onClose }) {
   const [selectedBeneficiary, setSelectedBeneficiary] = useState('');
@@ -19,13 +22,55 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
 
   const loadCampaignBalance = async () => {
     try {
-      if (!campaign.blockchainAddress) return;
+      if (!campaign.blockchainAddress) {
+        console.log('⚠️ No blockchain address for campaign');
+        return;
+      }
       
-      const campaignContract = await polygonService.getCampaignContract(campaign.blockchainAddress);
-      const balance = await campaignContract.read.totalRaised();
-      setCampaignBalance(formatEther(balance));
+      console.log('📊 Loading campaign balance for:', campaign.blockchainAddress);
+      
+      const publicClient = getPublicClient(config);
+      
+      // Read campaignInfo struct which contains raisedAmount
+      const campaignInfoData = await publicClient.readContract({
+        address: campaign.blockchainAddress,
+        abi: CampaignABI.abi,
+        functionName: 'campaignInfo',
+      });
+      
+      // Read totalAllocated to see what's already been allocated
+      const totalAllocated = await publicClient.readContract({
+        address: campaign.blockchainAddress,
+        abi: CampaignABI.abi,
+        functionName: 'totalAllocated',
+      });
+      
+      // Check actual token balance of campaign contract
+      const { CONTRACTS } = await import('../services/polygonService');
+      const ReliefTokenABI = await import('../contracts/ReliefToken.json');
+      
+      const tokenBalance = await publicClient.readContract({
+        address: CONTRACTS.reliefToken,
+        abi: ReliefTokenABI.abi,
+        functionName: 'balanceOf',
+        args: [campaign.blockchainAddress],
+      });
+      
+      console.log('Campaign info:', campaignInfoData);
+      console.log('📊 Campaign raisedAmount (on-chain):', formatEther(campaignInfoData[3]), 'RELIEF');
+      console.log('💰 Actual token balance of campaign:', formatEther(tokenBalance), 'RELIEF');
+      console.log('📤 Total allocated:', formatEther(totalAllocated), 'RELIEF');
+      
+      // campaignInfo returns a struct, raisedAmount is at index 3
+      const raisedAmount = campaignInfoData[3];
+      const availableBalance = raisedAmount - totalAllocated;
+      const balance = formatEther(availableBalance);
+      
+      console.log('✅ Available for allocation:', balance, 'RELIEF');
+      setCampaignBalance(balance);
     } catch (error) {
       console.error('Error loading campaign balance:', error);
+      console.error('Campaign address:', campaign.blockchainAddress);
     }
   };
 
@@ -47,7 +92,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
       }
 
       if (parseFloat(amount) > parseFloat(campaignBalance)) {
-        alert('Insufficient funds in campaign');
+        alert(`Insufficient funds in campaign.\n\nAvailable: ${campaignBalance} RELIEF\nRequested: ${amount} RELIEF`);
         return;
       }
 
@@ -55,61 +100,239 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
       setTxStatus('Preparing allocation...');
 
       const amountInWei = parseEther(amount);
-      const beneficiary = beneficiaries.find(b => b.walletAddress === selectedBeneficiary);
-
-      // Get campaign contract
-      const campaignContract = await polygonService.getCampaignContract(campaign.blockchainAddress);
-
-      // Call allocateFunds to create BeneficiaryWallet
-      setTxStatus('Creating beneficiary wallet... Please confirm in MetaMask');
+      const beneficiary = beneficiaries.find(b => b.id === selectedBeneficiary);
       
-      // Use staticCall to get the wallet address that will be created
-      const walletAddress = await campaignContract.read.allocateFunds([selectedBeneficiary, amountInWei]);
+      if (!beneficiary) {
+        alert('Beneficiary not found');
+        setIsProcessing(false);
+        return;
+      }
+
+      console.log('🎯 Allocating funds:', {
+        beneficiary: beneficiary.walletAddress,
+        amount: amount,
+        amountInWei: amountInWei.toString(),
+        campaign: campaign.blockchainAddress,
+        organizerAddress: walletClient.account.address
+      });
+
+      // First, estimate gas to reveal any errors
+      const publicClient = getPublicClient(config);
       
-      // Now execute the actual transaction
+      setTxStatus('Checking allocation requirements...');
+      console.log('⚡ Estimating gas for allocation...');
+      
+      // Read campaign state first to debug
+      const campaignInfoData = await publicClient.readContract({
+        address: campaign.blockchainAddress,
+        abi: CampaignABI.abi,
+        functionName: 'campaignInfo',
+      });
+      
+      const totalAllocated = await publicClient.readContract({
+        address: campaign.blockchainAddress,
+        abi: CampaignABI.abi,
+        functionName: 'totalAllocated',
+      });
+      
+      const raisedAmount = campaignInfoData[3];
+      
+      console.log('📊 Pre-allocation check:', {
+        raisedAmount: formatEther(raisedAmount),
+        totalAllocated: formatEther(totalAllocated),
+        requestedAmount: formatEther(amountInWei),
+        wouldBeTotal: formatEther(totalAllocated + amountInWei),
+        hasEnough: raisedAmount >= (totalAllocated + amountInWei)
+      });
+      
+      try {
+        const gasEstimate = await publicClient.estimateContractGas({
+          address: campaign.blockchainAddress,
+          abi: CampaignABI.abi,
+          functionName: 'allocateFunds',
+          args: [beneficiary.walletAddress, amountInWei],
+          account: walletClient.account.address,
+        });
+        console.log('✅ Gas estimation successful:', gasEstimate);
+      } catch (gasError) {
+        console.error('❌ Gas estimation failed:');
+        console.error('Full error:', gasError);
+        console.error('Error name:', gasError.name);
+        console.error('Error message:', gasError.message);
+        console.error('Short message:', gasError.shortMessage);
+        console.error('Details:', gasError.details);
+        console.error('Meta messages:', gasError.metaMessages);
+        
+        // Try to extract the actual revert reason
+        let errorMessage = 'Unknown error';
+        if (gasError.message) {
+          if (gasError.message.includes('Insufficient campaign balance')) {
+            errorMessage = `Campaign doesn't have enough funds.\n\nAvailable: ${formatEther(raisedAmount - totalAllocated)} RELIEF\nRequested: ${amount} RELIEF`;
+          } else if (gasError.message.includes('Invalid beneficiary')) {
+            errorMessage = 'Invalid beneficiary address';
+          } else if (gasError.shortMessage) {
+            errorMessage = gasError.shortMessage;
+          } else {
+            errorMessage = gasError.message;
+          }
+        }
+        
+        throw new Error(`Cannot allocate funds: ${errorMessage}`);
+      }
+
       setTxStatus('Please confirm allocation in MetaMask...');
-      const txHash = await campaignContract.write.allocateFunds([selectedBeneficiary, amountInWei]);
+      
+      let txHash;
+      try {
+        // Execute allocation transaction
+        txHash = await walletClient.writeContract({
+          address: campaign.blockchainAddress,
+          abi: CampaignABI.abi,
+          functionName: 'allocateFunds',
+          args: [beneficiary.walletAddress, amountInWei],
+          account: walletClient.account,
+        });
+
+        console.log('📝 Transaction hash:', txHash);
+      } catch (txError) {
+        console.error('Transaction error:', txError);
+        throw txError; // This is a real error, rethrow it
+      }
 
       setTxStatus('Waiting for transaction confirmation...');
-      const receipt = await polygonService.waitForTransaction(txHash);
+      
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+      
+      console.log('✅ Transaction confirmed:', receipt);
+      console.log('🎉 Allocation successful on blockchain!');
 
-      // Update Firebase
-      setTxStatus('Updating database...');
+      // Extract beneficiary wallet address from event logs
+      let walletAddress = null;
+      try {
+        for (const log of receipt.logs) {
+          // Find FundsAllocated event
+          if (log.topics.length >= 2) {
+            // The beneficiary address is in the first indexed parameter (topic[1])
+            const beneficiaryFromLog = `0x${log.topics[1].slice(26)}`;
+            if (beneficiaryFromLog.toLowerCase() === beneficiary.walletAddress.toLowerCase()) {
+              // Wallet address is typically in the log data or topic[2]
+              if (log.topics.length >= 3) {
+                walletAddress = `0x${log.topics[2].slice(26)}`;
+              }
+              break;
+            }
+          }
+        }
+      } catch (logErr) {
+        console.warn('Could not parse wallet address from logs, will continue anyway:', logErr);
+      }
 
-      // Add allocation record
-      await addDoc(collection(db, 'allocations'), {
-        campaignId: campaign.id,
-        campaignTitle: campaign.title,
-        beneficiaryId: selectedBeneficiary,
-        beneficiaryName: beneficiary.name,
-        amount: parseFloat(amount),
-        walletAddress: walletAddress,
-        txHash: txHash,
-        blockNumber: receipt.blockNumber.toString(),
-        network: 'polygon-amoy',
-        chainId: 80002,
-        createdAt: serverTimestamp()
-      });
+      // Update Firebase - if this fails, we still succeeded on blockchain
+      try {
+        setTxStatus('Updating database...');
 
-      // Update beneficiary document
-      const beneficiaryRef = doc(db, 'users', selectedBeneficiary);
-      await updateDoc(beneficiaryRef, {
-        walletAddress: walletAddress,
-        allocatedAmount: parseFloat(amount),
-        hasWallet: true,
-        updatedAt: serverTimestamp()
-      });
+        // Add allocation record
+        if (db) {
+          console.log('💾 Saving to Firebase:', {
+            beneficiaryId: selectedBeneficiary,
+            beneficiaryWallet: beneficiary.walletAddress,
+            amount: parseFloat(amount),
+            contractWalletAddress: walletAddress
+          });
 
-      alert(`Successfully allocated ${amount} RELIEF tokens!\n\nBeneficiary Wallet: ${walletAddress}\n\nTransaction: ${txHash}\n\nView on PolygonScan: ${polygonService.getPolygonScanUrl(txHash)}`);
+          await addDoc(collection(db, 'allocations'), {
+            campaignId: campaign.id,
+            campaignTitle: campaign.title,
+            beneficiaryId: selectedBeneficiary,
+            beneficiaryName: beneficiary.name || beneficiary.email,
+            beneficiaryWallet: beneficiary.walletAddress,
+            amount: parseFloat(amount),
+            contractWalletAddress: walletAddress,
+            txHash: txHash,
+            blockNumber: receipt.blockNumber.toString(),
+            network: 'polygon-amoy',
+            chainId: 80002,
+            createdAt: new Date().toISOString()
+          });
 
-      onClose();
-    } catch (error) {
-      console.error('Allocation error:', error);
-      const errorMsg = polygonService.parseContractError(error);
-      alert(`Allocation failed: ${errorMsg}`);
-    } finally {
+          // Update beneficiary document with allocated amount (use lowercase)
+          const beneficiaryDocId = selectedBeneficiary.toLowerCase();
+          console.log('━'.repeat(60));
+          console.log('📝 UPDATING BENEFICIARY FIREBASE DOCUMENT');
+          console.log('━'.repeat(60));
+          console.log('Document ID (lowercase):', beneficiaryDocId);
+          console.log('Original ID:', selectedBeneficiary);
+          console.log('Contract Wallet:', walletAddress);
+          
+          const beneficiaryRef = doc(db, 'users', beneficiaryDocId);
+          
+          // Get current allocated amount
+          const currentAllocated = beneficiary.allocatedAmount || 0;
+          const newAllocated = currentAllocated + parseFloat(amount);
+          
+          console.log('💰 Allocation update:', {
+            current: currentAllocated,
+            adding: parseFloat(amount),
+            new: newAllocated,
+            contractWallet: walletAddress
+          });
+
+          await updateDoc(beneficiaryRef, {
+            allocatedAmount: newAllocated,
+            contractWalletAddress: walletAddress,
+            updatedAt: new Date().toISOString()
+          });
+          
+          console.log('✅ Firebase updated successfully');
+          console.log('━'.repeat(60));
+        }
+      } catch (dbError) {
+        console.error('━'.repeat(60));
+        console.error('❌ FIREBASE UPDATE FAILED');
+        console.error('━'.repeat(60));
+        console.error('Error Type:', dbError.name);
+        console.error('Error Message:', dbError.message);
+        console.error('Error Code:', dbError.code);
+        console.error('Full Error:', dbError);
+        console.error('');
+        console.error('Attempted to update document ID:', selectedBeneficiary.toLowerCase());
+        console.error('Contract Wallet:', walletAddress);
+        console.error('Allocated Amount:', parseFloat(amount));
+        console.error('');
+        console.error('⚠️ IMPORTANT: Blockchain transaction succeeded!');
+        console.error('The funds WERE allocated on blockchain.');
+        console.error('Only the Firebase record update failed.');
+        console.error('');
+        console.error('The beneficiary dashboard will still show funds');
+        console.error('because it now reads directly from blockchain.');
+        console.error('━'.repeat(60));
+        // Don't throw - blockchain succeeded, Firebase is just for our records
+      }
+
+      // Reload balance
+      try {
+        await loadCampaignBalance();
+      } catch (balanceError) {
+        console.warn('Could not reload balance:', balanceError);
+      }
+      
+      alert(`✅ Funds allocated successfully!\n\nAmount: ${amount} RELIEF\nBeneficiary: ${beneficiary.name || beneficiary.email}\n\nTransaction: ${txHash.substring(0, 10)}...`);
+      
       setIsProcessing(false);
       setTxStatus('');
+      onClose();
+    } catch (error) {
+      console.error('Error allocating funds:', error);
+      setIsProcessing(false);
+      setTxStatus('');
+      
+      if (error.message?.includes('user rejected')) {
+        alert('❌ Transaction rejected by user');
+      } else if (error.message?.includes('insufficient funds')) {
+        alert('❌ Insufficient POL for gas fee');
+      } else {
+        alert(`❌ Error allocating funds:\n\n${error.message || error}`);
+      }
     }
   };
 
@@ -148,8 +371,8 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
           >
             <option value="">Choose a beneficiary...</option>
             {beneficiaries.map(beneficiary => (
-              <option key={beneficiary.walletAddress} value={beneficiary.walletAddress}>
-                {beneficiary.name} - {beneficiary.walletAddress.slice(0, 6)}...{beneficiary.walletAddress.slice(-4)}
+              <option key={beneficiary.id} value={beneficiary.id}>
+                {beneficiary.name || beneficiary.email} - {beneficiary.walletAddress?.slice(0, 6)}...{beneficiary.walletAddress?.slice(-4)}
               </option>
             ))}
           </select>

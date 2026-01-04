@@ -27,8 +27,8 @@ export default function LandingPage() {
         return;
       }
 
-      // Check if user exists in Firestore
-      const userRef = doc(db, 'users', address);
+      // Check if user exists in Firestore (using lowercase for case-insensitive lookup)
+      const userRef = doc(db, 'users', address.toLowerCase());
       const userSnap = await getDoc(userRef);
 
       if (!userSnap.exists()) {

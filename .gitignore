@@ -53,3 +53,4 @@ functions/lib/
 **/serviceAccountKey.json
 **/*-key.json
 **/*.pem
+TESTING_GUIDE.md

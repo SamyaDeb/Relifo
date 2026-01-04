@@ -38,8 +38,8 @@ function Login() {
         return;
       }
 
-      // Check if user exists in Firestore
-      const userRef = doc(db, 'users', walletAddress);
+      // Check if user exists in Firestore (using lowercase for case-insensitive lookup)
+      const userRef = doc(db, 'users', walletAddress.toLowerCase());
       const userSnap = await getDoc(userRef);
 
       if (!userSnap.exists()) {

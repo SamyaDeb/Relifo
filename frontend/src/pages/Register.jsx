@@ -163,8 +163,8 @@ export default function Register() {
       }
       
       await Promise.all([
-        setDoc(doc(db, 'users', address), usersDocument),
-        setDoc(doc(db, profileCollection, address), roleProfile)
+        setDoc(doc(db, 'users', address.toLowerCase()), usersDocument),
+        setDoc(doc(db, profileCollection, address.toLowerCase()), roleProfile)
       ]);
 
       // Navigate immediately
