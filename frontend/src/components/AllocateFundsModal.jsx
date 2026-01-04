@@ -180,7 +180,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
         throw new Error(`Cannot allocate funds: ${errorMessage}`);
       }
 
-      setTxStatus('Please confirm allocation in MetaMask...');
+      setTxStatus('Please confirm the transaction in MetaMask...');
       
       let txHash;
       try {
@@ -193,66 +193,57 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
           account: walletClient.account,
         });
 
-        console.log('📝 Transaction hash:', txHash);
-        
-        // Show transaction link immediately
-        alert(`Transaction submitted! 🎉\n\nTransaction Hash: ${txHash}\n\nView on PolygonScan: ${getPolygonScanUrl(txHash, 'tx')}\n\nPlease wait for confirmation (30-60 seconds)...`);
+        console.log('✅ Transaction sent! Hash:', txHash);
+        console.log('🔗 PolygonScan:', getPolygonScanUrl(txHash, 'tx'));
       } catch (txError) {
-        console.error('Transaction error:', txError);
-        throw txError; // This is a real error, rethrow it
+        console.error('❌ Transaction submission failed:', txError);
+        throw new Error('Transaction rejected or failed to submit');
       }
 
-      setTxStatus('⏳ Waiting for blockchain confirmation (this may take 30-60 seconds)...');
+      setTxStatus('Transaction sent! Waiting for confirmation...');
       
-      // Wait for transaction confirmation with extended timeout (5 minutes for testnet)
+      // Wait for transaction confirmation with reasonable timeout
       let receipt;
       try {
         receipt = await publicClient.waitForTransactionReceipt({ 
           hash: txHash,
-          timeout: 300_000, // 5 minutes timeout for testnet
-          confirmations: 2 // Wait for 2 confirmations for safety
+          timeout: 120_000, // 2 minutes
+          confirmations: 1
         });
         
         console.log('✅ Transaction confirmed:', receipt);
+        
+        // Check if transaction succeeded
+        if (receipt.status === 'reverted' || receipt.status === 0) {
+          console.error('❌ Transaction reverted!');
+          console.error('Receipt:', receipt);
+          throw new Error('Transaction reverted on blockchain. The allocation failed. Check contract state and try again.');
+        }
+        
         console.log('🎉 Allocation successful on blockchain!');
       } catch (receiptError) {
-        console.error('❌ Timeout waiting for confirmation:', receiptError);
-        console.log('━'.repeat(60));
-        console.log('⚠️ TRANSACTION MAY STILL BE PENDING');
-        console.log('━'.repeat(60));
-        console.log('Transaction Hash:', txHash);
-        console.log('PolygonScan:', getPolygonScanUrl(txHash, 'tx'));
-        console.log('');
-        console.log('The transaction was sent but confirmation is taking longer than expected.');
-        console.log('This is normal on testnets. The funds WILL be allocated when it confirms.');
-        console.log('');
-        console.log('Next steps:');
-        console.log('1. Check PolygonScan link above to see transaction status');
-        console.log('2. Wait a few minutes and refresh beneficiary dashboard');
-        console.log('3. The transaction will confirm automatically');
-        console.log('━'.repeat(60));
+        console.error('❌ Transaction confirmation error:', receiptError);
         
-        // Don't throw error - the transaction was sent successfully
-        // We'll still try to update Firebase
-        alert(`⏳ Transaction Pending\n\nYour transaction was sent successfully but is still pending.\n\nHash: ${txHash.slice(0, 10)}...\n\nCheck status: ${getPolygonScanUrl(txHash, 'tx')}\n\nThe funds will be allocated once the transaction confirms (usually 1-2 minutes on testnet).`);
+        // If it's a timeout, the transaction might still be pending
+        if (receiptError.message?.includes('timeout')) {
+          console.log('⏳ Transaction still pending on blockchain');
+          console.log('Check status:', getPolygonScanUrl(txHash, 'tx'));
+          
+          alert(`⏳ Transaction Submitted\n\nTransaction Hash: ${txHash.substring(0, 10)}...\n\nThe transaction is taking longer than expected.\n\nCheck status: ${getPolygonScanUrl(txHash, 'tx')}\n\nPlease verify on PolygonScan before trying again.`);
+          
+          setIsProcessing(false);
+          setTxStatus('');
+          return; // Don't continue
+        }
         
-        // Create a dummy receipt for Firebase update
-        receipt = {
-          transactionHash: txHash,
-          blockNumber: 'pending',
-          status: 'pending',
-          logs: []
-        };
+        throw receiptError;
       }
-      
-      console.log('✅ Transaction confirmed:', receipt);
-      console.log('🎉 Allocation successful on blockchain!');
 
       // Extract beneficiary wallet address from event logs or query blockchain
       let walletAddress = null;
       
-      // If we have a confirmed transaction, try to get wallet from logs
-      if (receipt.status !== 'pending' && receipt.logs && receipt.logs.length > 0) {
+      // Try to get wallet from transaction logs
+      if (receipt.logs && receipt.logs.length > 0) {
         try {
           for (const log of receipt.logs) {
             // Find FundsAllocated event
@@ -278,7 +269,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
         console.log('📞 Querying blockchain for beneficiary wallet address...');
         try {
           walletAddress = await publicClient.readContract({
-            address: campaign.blockchainAddress || campaign.contractAddress,
+            address: campaign.blockchainAddress,
             abi: CampaignABI.abi,
             functionName: 'getBeneficiaryWallet',
             args: [beneficiary.walletAddress],
@@ -380,27 +371,37 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose })
       }
       
       // Show success message
-      if (receipt.status === 'pending') {
-        alert(`⏳ Transaction Pending\n\nAmount: ${amount} RELIEF\nBeneficiary: ${beneficiary.name || beneficiary.email}\n\nThe transaction was sent successfully!\nIt will confirm in 1-2 minutes on testnet.\n\nView status: ${getPolygonScanUrl(txHash, 'tx')}`);
-      } else {
-        alert(`✅ Funds Allocated Successfully!\n\nAmount: ${amount} RELIEF\nBeneficiary: ${beneficiary.name || beneficiary.email}\n\nTransaction confirmed!\n\nView on PolygonScan: ${getPolygonScanUrl(txHash, 'tx')}\n\nThe beneficiary can now see and spend these funds.`);
-      }
+      alert(`✅ Funds Allocated Successfully!\n\nAmount: ${amount} RELIEF\nBeneficiary: ${beneficiary.name || beneficiary.email}\n\nTransaction: ${txHash.substring(0, 20)}...\n\nView on PolygonScan:\n${getPolygonScanUrl(txHash, 'tx')}\n\nThe beneficiary can now see and spend these funds.`);
       
       setIsProcessing(false);
       setTxStatus('');
       onClose();
     } catch (error) {
-      console.error('Error allocating funds:', error);
+      console.error('━'.repeat(60));
+      console.error('❌ ALLOCATION ERROR');
+      console.error('━'.repeat(60));
+      console.error('Error:', error);
+      console.error('Error message:', error.message);
+      console.error('━'.repeat(60));
+      
       setIsProcessing(false);
       setTxStatus('');
       
-      if (error.message?.includes('user rejected')) {
-        alert('❌ Transaction rejected by user');
+      let errorMessage = 'Unknown error occurred';
+      
+      if (error.message?.includes('user rejected') || error.message?.includes('User rejected')) {
+        errorMessage = 'Transaction rejected by user';
       } else if (error.message?.includes('insufficient funds')) {
-        alert('❌ Insufficient POL for gas fee');
-      } else {
-        alert(`❌ Error allocating funds:\n\n${error.message || error}`);
+        errorMessage = 'Insufficient POL for gas fee. Please add POL to your wallet.';
+      } else if (error.message?.includes('Insufficient campaign balance')) {
+        errorMessage = `Campaign has insufficient funds.\n\nAvailable: ${campaignBalance} RELIEF\nRequested: ${amount} RELIEF`;
+      } else if (error.message?.includes('reverted')) {
+        errorMessage = `Transaction reverted on blockchain.\n\nPossible reasons:\n• Campaign has insufficient funds\n• Beneficiary not approved\n• Contract paused\n\nPlease check and try again.`;
+      } else if (error.message) {
+        errorMessage = error.message;
       }
+      
+      alert(`❌ Allocation Failed\n\n${errorMessage}`);
     }
   };
 
