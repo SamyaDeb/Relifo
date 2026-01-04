@@ -617,8 +617,9 @@ function CreateCampaignModal({ onClose, onSuccess, organizerId }) {
           beneficiaries: 0,
           status: 'active',
           createdAt: new Date().toISOString(),
-          // Blockchain data
+          // Blockchain data - CRITICAL: used by beneficiary dashboard
           blockchainAddress: campaignAddress,
+          contractAddress: campaignAddress, // Alias for compatibility
           txHash: tx,
           network: 'polygon-amoy',
           chainId: 80002

@@ -127,7 +127,6 @@ export default function BeneficiaryDashboard() {
         } else {
           console.warn('⚠️ User data missing campaignId field');
         }
-      }
         
         // Also check Firebase data (for backward compatibility)
         if (data.contractWalletAddress && !contractWalletAddress) {
