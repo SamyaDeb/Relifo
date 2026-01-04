@@ -1,24 +1,28 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useAccount } from 'wagmi';
 import { db } from '../firebase/config';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
-import { freighterService } from '../services/freighterService';
 import { USER_STATUS, ROLES } from '../firebase/constants';
 
 export default function PendingApproval() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { address, isConnected } = useAccount();
   const [userData, setUserData] = useState(location.state?.userData || null);
   const [campaign, setCampaign] = useState(null);
   const [loading, setLoading] = useState(!location.state?.justRegistered);
 
   useEffect(() => {
+    if (!isConnected || !address) {
+      navigate('/login');
+      return;
+    }
+
     let unsubscribe;
 
     const checkApprovalStatus = async () => {
       try {
-        const publicKey = await freighterService.getPublicKey();
-        
         // If coming from registration, load campaign info immediately
         if (location.state?.justRegistered && userData?.role === ROLES.BENEFICIARY && userData?.campaignId) {
           try {
@@ -34,9 +38,9 @@ export default function PendingApproval() {
         
         if (db) {
           // Real-time listener for approval status
-          unsubscribe = onSnapshot(doc(db, 'users', publicKey), async (doc) => {
-            if (doc.exists()) {
-              const data = doc.data();
+          unsubscribe = onSnapshot(doc(db, 'users', address), async (snapshot) => {
+            if (snapshot.exists()) {
+              const data = snapshot.data();
               setUserData(data);
               
               // Load campaign info if beneficiary
@@ -82,7 +86,7 @@ export default function PendingApproval() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [navigate]);
+  }, [navigate, address, isConnected, location.state, userData?.role, userData?.campaignId]);
 
   if (loading) {
     return (
