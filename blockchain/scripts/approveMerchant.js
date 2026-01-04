@@ -1,53 +1,69 @@
 const hre = require("hardhat");
+require("dotenv").config();
 
 /**
- * Approve a merchant for a specific category in a BeneficiaryWallet
+ * Verify a merchant on CampaignFactory contract (Super Admin only)
  * 
- * Usage: npx hardhat run scripts/approveMerchant.js --network amoy
- * 
- * Categories:
- * 0 = Food
- * 1 = Medicine
- * 2 = Shelter
- * 3 = Education
- * 4 = Clothing
- * 5 = Other
+ * Usage: MERCHANT_ADDRESS=0x... npx hardhat run scripts/approveMerchant.js --network amoy
  */
 
 async function main() {
-  // ============= CONFIGURATION =============
-  // UPDATE THESE VALUES:
-  const BENEFICIARY_WALLET_ADDRESS = "0x0C8E19e91952E2954eea3f479E1E85728DfEbb2F"; // The beneficiary's wallet contract
-  const MERCHANT_ADDRESS = "0x3ae5f0da6031f1b974904c55b84a6ab205e9d1dd"; // The merchant to approve
-  const CATEGORY = 0; // 0 = Food, 1 = Medicine, 2 = Shelter, 3 = Education, 4 = Clothing, 5 = Other
+  const merchantAddress = process.env.MERCHANT_ADDRESS;
   
-  const CATEGORIES = ['Food', 'Medicine', 'Shelter', 'Education', 'Clothing', 'Other'];
-  // ==========================================
+  if (!merchantAddress) {
+    console.error("❌ Error: MERCHANT_ADDRESS environment variable not set");
+    console.log("Usage: MERCHANT_ADDRESS=0x... npx hardhat run scripts/approveMerchant.js --network amoy");
+    process.exit(1);
+  }
 
-  console.log('🔐 Approving merchant for beneficiary wallet...');
-  console.log('------------------------------------------------------------');
-  console.log('Beneficiary Wallet:', BENEFICIARY_WALLET_ADDRESS);
-  console.log('Merchant Address:', MERCHANT_ADDRESS);
-  console.log('Category:', CATEGORIES[CATEGORY], `(${CATEGORY})`);
-  console.log('------------------------------------------------------------\n');
-
-  const [organizer] = await hre.ethers.getSigners();
-  console.log('👤 Organizer address:', organizer.address);
-  console.log('💰 Organizer balance:', hre.ethers.formatEther(await hre.ethers.provider.getBalance(organizer.address)), 'MATIC\n');
-
-  // Get the BeneficiaryWallet contract
-  const BeneficiaryWallet = await hre.ethers.getContractAt(
-    "BeneficiaryWallet",
-    BENEFICIARY_WALLET_ADDRESS
-  );
-
-  // Check if already approved
-  console.log('🔍 Checking current approval status...');
-  const isCurrentlyApproved = await BeneficiaryWallet.isMerchantApproved(MERCHANT_ADDRESS, CATEGORY);
-  console.log('Current status:', isCurrentlyApproved ? '✅ Already Approved' : '❌ Not Approved');
+  console.log("🏪 Verifying Merchant on Blockchain");
+  console.log("=====================================");
+  console.log("Merchant Address:", merchantAddress);
   
-  if (isCurrentlyApproved) {
-    console.log('\n✅ Merchant is already approved for this category!');
+  // Get deployed contract address
+  const deployments = require("../deployments/amoy.json");
+  const factoryAddress = deployments.contracts.CampaignFactory;
+  console.log("CampaignFactory:", factoryAddress);
+  
+  // Get the contract
+  const campaignFactory = await hre.ethers.getContractAt("CampaignFactory", factoryAddress);
+  
+  // Check if already verified
+  const isVerified = await campaignFactory.isVerifiedMerchant(merchantAddress);
+  
+  if (isVerified) {
+    console.log("\n⚠️  Merchant is already verified!");
+    process.exit(0);
+  }
+  
+  // Verify the merchant
+  console.log("\n📝 Sending transaction to verify merchant...");
+  const tx = await campaignFactory.verifyMerchant(merchantAddress);
+  console.log("Transaction hash:", tx.hash);
+  
+  console.log("⏳ Waiting for confirmation...");
+  const receipt = await tx.wait();
+  
+  console.log("\n✅ Merchant Verified Successfully!");
+  console.log("=====================================");
+  console.log("Block number:", receipt.blockNumber);
+  console.log("Gas used:", receipt.gasUsed.toString());
+  
+  // Verify the approval
+  const verified = await campaignFactory.isVerifiedMerchant(merchantAddress);
+  console.log("\n✓ Verification confirmed:", verified);
+  
+  // Get all verified merchants
+  const allMerchants = await campaignFactory.getAllVerifiedMerchants();
+  console.log("\n📊 Total verified merchants:", allMerchants.length);
+}
+
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
     return;
   }
 
