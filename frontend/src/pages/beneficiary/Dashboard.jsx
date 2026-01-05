@@ -19,7 +19,6 @@ export default function BeneficiaryDashboard() {
   const [spentAmount, setSpentAmount] = useState('0');
   const [transactions, setTransactions] = useState([]);
   const [showSpendModal, setShowSpendModal] = useState(false);
-  const [showMerchantModal, setShowMerchantModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [campaign, setCampaign] = useState(null);
   const [userData, setUserData] = useState(null);
@@ -378,7 +377,6 @@ export default function BeneficiaryDashboard() {
       await loadWalletBalance(contractWalletAddress);
 
       alert(`✅ Successfully spent ${amount} RELIEF with ${merchant.name}!\n\nTransaction: ${hash}`);
-      setShowMerchantModal(false);
 
     } catch (error) {
       console.error('❌ Spending failed:', error.message);
@@ -600,26 +598,17 @@ export default function BeneficiaryDashboard() {
               </div>
             )}
 
-            {/* Action Buttons */}
+            {/* Action Button */}
             <div className="glass-card border border-white/20 rounded-3xl p-5 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all mb-4 flex-shrink-0">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <button
-                  onClick={() => setShowSpendModal(true)}
-                  disabled={parseFloat(currentBalance) <= 0}
-                  className="group relative flex cursor-pointer items-center justify-center whitespace-nowrap border border-white/10 px-6 py-4 text-white bg-gradient-to-r from-green-500 to-emerald-500 rounded-[100px] transform-gpu transition-transform duration-300 ease-in-out active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <span className="relative z-20 text-lg font-semibold">🛒 Spend</span>
-                </button>
-                <button
-                  onClick={() => setShowMerchantModal(true)}
-                  disabled={parseFloat(currentBalance) <= 0 || merchants.length === 0}
-                  className="group relative flex cursor-pointer items-center justify-center whitespace-nowrap border border-white/10 px-6 py-4 text-white bg-gradient-to-r from-blue-500 to-cyan-500 rounded-[100px] transform-gpu transition-transform duration-300 ease-in-out active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <span className="relative z-20 text-lg font-semibold">🏪 Merchant</span>
-                </button>
-              </div>
+              <button
+                onClick={() => setShowSpendModal(true)}
+                disabled={parseFloat(currentBalance) <= 0}
+                className="w-full group relative flex cursor-pointer items-center justify-center whitespace-nowrap border border-white/10 px-6 py-4 text-white bg-gradient-to-r from-green-500 to-emerald-500 rounded-[100px] transform-gpu transition-transform duration-300 ease-in-out active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span className="relative z-20 text-lg font-semibold">🛒 Spend RELIEF Tokens</span>
+              </button>
               <p className="text-xs text-white/50 mt-3 text-center">
-                Balance: {parseFloat(currentBalance).toFixed(2)} RELIEF
+                Current Balance: {parseFloat(currentBalance).toFixed(2)} RELIEF
               </p>
             </div>
 
@@ -664,9 +653,6 @@ export default function BeneficiaryDashboard() {
 
       {/* Spend Modal */}
       {showSpendModal && <SpendModal />}
-
-      {/* Merchant Spending Modal */}
-      {showMerchantModal && <MerchantSpendingModal />}
 
       {/* CSS Animations */}
       <style jsx>{`
@@ -732,6 +718,7 @@ export default function BeneficiaryDashboard() {
       <SpendFundsModal
         walletAddress={contractWalletAddress}
         availableBalance={remainingAmount}
+        merchants={merchants}
         onClose={() => setShowSpendModal(false)}
         onSuccess={() => loadWalletBalance(contractWalletAddress)}
       />
@@ -784,27 +771,48 @@ function getCategoryIcon(category) {
   return icons[category] || '📦';
 }
 
-function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }) {
-  const [merchantAddress, setMerchantAddress] = useState('');
+function SpendFundsModal({ walletAddress, availableBalance, merchants: merchantsProp, onClose, onSuccess }) {
+  const [step, setStep] = useState(1); // 1: category, 2: merchant, 3: amount
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedMerchant, setSelectedMerchant] = useState(null);
   const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState('Food');
-  const [merchantName, setMerchantName] = useState('');
   const [txStatus, setTxStatus] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const { data: walletClient } = useWalletClient();
   const { address } = useAccount();
 
   const categories = ['Food', 'Medicine', 'Shelter', 'Education', 'Clothing', 'Other'];
+  const merchants = merchantsProp || [];
+
+  // Filter merchants by selected category
+  const filteredMerchants = merchants.filter(m => 
+    m.category === selectedCategory && m.isActive
+  );
+
+  const handleCategorySelect = (cat) => {
+    setSelectedCategory(cat);
+    setStep(2);
+  };
+
+  const handleMerchantSelect = (merchant) => {
+    setSelectedMerchant(merchant);
+    setStep(3);
+  };
+
+  const handleBack = () => {
+    if (step === 3) {
+      setStep(2);
+      setAmount('');
+    } else if (step === 2) {
+      setStep(1);
+      setSelectedMerchant(null);
+    }
+  };
 
   const handleSpend = async () => {
     try {
-      if (!merchantAddress || !amount || parseFloat(amount) <= 0) {
-        alert('Please enter merchant address and valid amount');
-        return;
-      }
-
-      if (!merchantName) {
-        alert('Please enter merchant name');
+      if (!selectedMerchant || !amount || parseFloat(amount) <= 0) {
+        alert('Please enter a valid amount');
         return;
       }
 
@@ -826,13 +834,14 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
 
       console.log('🛒 Spending:', {
         wallet: walletAddress,
-        merchant: merchantAddress,
+        merchant: selectedMerchant.address,
+        merchantName: selectedMerchant.name,
         amount: amount,
-        category: category
+        category: selectedCategory
       });
 
       // Map category to Category enum (0 = Food, 1 = Medicine, etc.)
-      const categoryIndex = categories.indexOf(category);
+      const categoryIndex = categories.indexOf(selectedCategory);
 
       // Check if merchant is approved for this category
       setTxStatus('Verifying merchant approval...');
@@ -840,17 +849,17 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
         address: walletAddress,
         abi: BeneficiaryWalletABI.abi,
         functionName: 'isMerchantApproved',
-        args: [merchantAddress, categoryIndex],
+        args: [selectedMerchant.address, categoryIndex],
       });
 
       if (!isApproved) {
         setIsProcessing(false);
-        alert(`❌ Merchant Not Approved\n\nThis merchant (${merchantName}) is not approved for ${category} purchases.\n\n📋 To spend at this merchant:\n1. Request merchant approval from your organizer\n2. Contact: Your campaign organizer\n3. Provide: Merchant address and category\n\nMerchant Address:\n${merchantAddress}\n\nCategory: ${category} (${categoryIndex})`);
+        alert(`❌ Merchant Not Approved\n\nThis merchant (${selectedMerchant.name}) is not approved for ${selectedCategory} purchases.\n\n📋 To spend at this merchant:\n1. Request merchant approval from your organizer\n2. Contact: Your campaign organizer\n3. Provide: Merchant address and category\n\nMerchant Address:\n${selectedMerchant.address}\n\nCategory: ${selectedCategory} (${categoryIndex})`);
         return;
       }
 
       // Prepare description (merchant name and category)
-      const description = `Purchase from ${merchantName} - ${category}`;
+      const description = `Purchase from ${selectedMerchant.name} - ${selectedCategory}`;
 
       setTxStatus('Preparing spending transaction...');
 
@@ -860,7 +869,7 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
           address: walletAddress,
           abi: BeneficiaryWalletABI.abi,
           functionName: 'spend',
-          args: [merchantAddress, amountInWei, categoryIndex, description],
+          args: [selectedMerchant.address, amountInWei, categoryIndex, description],
           account: address,
         });
         console.log('✅ Gas estimation successful:', gasEstimate);
@@ -885,7 +894,7 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
         address: walletAddress,
         abi: BeneficiaryWalletABI.abi,
         functionName: 'spend',
-        args: [merchantAddress, amountInWei, categoryIndex, description],
+        args: [selectedMerchant.address, amountInWei, categoryIndex, description],
         account: address,
       });
 
@@ -902,22 +911,36 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
           await addDoc(collection(db, 'spending'), {
             beneficiaryId: address.toLowerCase(),
             walletAddress: walletAddress,
-            merchantAddress: merchantAddress,
-            merchantName: merchantName,
+            merchantAddress: selectedMerchant.address,
+            merchantName: selectedMerchant.name,
             amount: parseFloat(amount),
-            category: category,
+            category: selectedCategory,
             txHash: txHash,
             blockNumber: receipt.blockNumber.toString(),
             network: 'polygon-amoy',
             chainId: 80002,
             createdAt: new Date().toISOString()
           });
+
+          // Also add to transactions collection
+          await addDoc(collection(db, 'transactions'), {
+            beneficiaryAddress: address.toLowerCase(),
+            merchantAddress: selectedMerchant.address.toLowerCase(),
+            merchantName: selectedMerchant.name,
+            amount: parseFloat(amount),
+            transactionHash: txHash,
+            blockNumber: receipt.blockNumber.toString(),
+            status: 'confirmed',
+            type: 'spending',
+            timestamp: new Date().toISOString(),
+          });
+          });
         }
       } catch (dbError) {
         console.warn('⚠️ Firebase update failed (blockchain transaction succeeded):', dbError);
       }
 
-      alert(`✅ Successfully spent ${amount} RELIEF tokens!\n\nMerchant: ${merchantName}\nCategory: ${category}\n\nTransaction: ${txHash.substring(0, 10)}...`);
+      alert(`✅ Successfully spent ${amount} RELIEF tokens!\n\nMerchant: ${selectedMerchant.name}\nCategory: ${selectedCategory}\n\nTransaction: ${txHash.substring(0, 10)}...`);
 
       // Reload balance
       if (onSuccess) {
@@ -939,7 +962,22 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold text-gray-900">Spend Funds</h2>
+          <div className="flex items-center gap-2">
+            {step > 1 && (
+              <button
+                onClick={handleBack}
+                disabled={isProcessing}
+                className="text-gray-500 hover:text-gray-700 disabled:opacity-50"
+              >
+                ← Back
+              </button>
+            )}
+            <h2 className="text-2xl font-bold text-gray-900">
+              {step === 1 && '🏷️ Select Category'}
+              {step === 2 && '🏪 Select Merchant'}
+              {step === 3 && '💳 Enter Amount'}
+            </h2>
+          </div>
           <button
             onClick={onClose}
             disabled={isProcessing}
@@ -956,228 +994,128 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
           </p>
         </div>
 
-        {/* Merchant Name */}
-        <div className="mb-4">
-          <label className="block text-gray-700 font-medium mb-2">
-            Merchant Name
-          </label>
-          <input
-            type="text"
-            value={merchantName}
-            onChange={(e) => setMerchantName(e.target.value)}
-            disabled={isProcessing}
-            placeholder="e.g., Local Grocery Store"
-            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:bg-gray-100"
-          />
-        </div>
-
-        {/* Merchant Address */}
-        <div className="mb-4">
-          <label className="block text-gray-700 font-medium mb-2">
-            Merchant Wallet Address
-          </label>
-          <input
-            type="text"
-            value={merchantAddress}
-            onChange={(e) => setMerchantAddress(e.target.value)}
-            disabled={isProcessing}
-            placeholder="0x..."
-            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:bg-gray-100 font-mono text-sm"
-          />
-        </div>
-
-        {/* Amount Input */}
-        <div className="mb-4">
-          <label className="block text-gray-700 font-medium mb-2">
-            Amount (RELIEF Tokens)
-          </label>
-          <input
-            type="number"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            disabled={isProcessing}
-            placeholder="Enter amount"
-            min="0"
-            step="0.01"
-            max={availableBalance}
-            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:bg-gray-100"
-          />
-        </div>
-
-        {/* Category Selection */}
-        <div className="mb-4">
-          <label className="block text-gray-700 font-medium mb-2">
-            Spending Category
-          </label>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            disabled={isProcessing}
-            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:bg-gray-100"
-          >
+        {/* Step 1: Category Selection */}
+        {step === 1 && (
+          <div className="space-y-3">
+            <p className="text-gray-600 mb-4">Choose the category you want to spend in:</p>
             {categories.map(cat => (
-              <option key={cat} value={cat}>
-                {getCategoryIcon(cat)} {cat}
-              </option>
+              <button
+                key={cat}
+                onClick={() => handleCategorySelect(cat)}
+                className="w-full p-4 bg-gradient-to-r from-purple-50 to-pink-50 hover:from-purple-100 hover:to-pink-100 border-2 border-purple-200 hover:border-purple-400 rounded-lg transition-all text-left flex items-center gap-3"
+              >
+                <span className="text-3xl">{getCategoryIcon(cat)}</span>
+                <span className="font-semibold text-gray-800">{cat}</span>
+              </button>
             ))}
-          </select>
-        </div>
-
-        {/* Transaction Status */}
-        {txStatus && (
-          <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <div className="flex items-center">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-600 mr-2"></div>
-              <p className="text-sm text-yellow-800">{txStatus}</p>
-            </div>
           </div>
         )}
 
-        {/* Spend Button */}
-        <button
-          onClick={handleSpend}
-          disabled={isProcessing || !merchantAddress || !amount || !merchantName || parseFloat(amount) <= 0}
-          className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white py-3 rounded-lg font-semibold hover:shadow-lg transition-shadow disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isProcessing ? (
-            <span className="flex items-center justify-center">
-              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Processing...
-            </span>
-          ) : (
-            '🛒 Spend RELIEF Tokens'
-          )}
-        </button>
-
-        <p className="text-xs text-gray-500 mt-3 text-center">
-          Spending is restricted by category and approved merchants
-        </p>
-      </div>
-    </div>
-  );
-
-  // Merchant Spending Modal Component
-  function MerchantSpendingModal() {
-    const [selectedMerchant, setSelectedMerchant] = useState(null);
-    const [spendAmount, setSpendAmount] = useState('');
-    const [isProcessing, setIsProcessing] = useState(false);
-    const [txStatus, setTxStatus] = useState('');
-
-    const handleSpend = async () => {
-      if (!selectedMerchant || !spendAmount) {
-        alert('Please select a merchant and enter amount');
-        return;
-      }
-
-      setIsProcessing(true);
-      setTxStatus('Processing transaction...');
-
-      try {
-        await handleSpendWithMerchant(selectedMerchant, spendAmount);
-        setSpendAmount('');
-        setSelectedMerchant(null);
-        setTxStatus('');
-        setIsProcessing(false);
-      } catch (error) {
-        console.error('Error:', error);
-        setTxStatus('');
-        setIsProcessing(false);
-      }
-    };
-
-    return (
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        <div className="glass-card border border-white/20 rounded-3xl p-6 max-w-md w-full bg-black/90 backdrop-blur-md">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold text-white">💳 Spend with Merchant</h2>
-            <button
-              onClick={() => setShowMerchantModal(false)}
-              className="text-white/60 hover:text-white transition"
-            >
-              ✕
-            </button>
+        {/* Step 2: Merchant Selection */}
+        {step === 2 && (
+          <div className="space-y-3">
+            <p className="text-gray-600 mb-4">
+              Approved merchants for <strong>{selectedCategory}</strong>:
+            </p>
+            {filteredMerchants.length === 0 ? (
+              <div className="p-6 bg-yellow-50 border border-yellow-200 rounded-lg text-center">
+                <p className="text-yellow-800">
+                  ⚠️ No approved merchants found for {selectedCategory}.
+                </p>
+                <p className="text-sm text-yellow-700 mt-2">
+                  Please contact your organizer to approve merchants.
+                </p>
+              </div>
+            ) : (
+              filteredMerchants.map(merchant => (
+                <button
+                  key={merchant.id}
+                  onClick={() => handleMerchantSelect(merchant)}
+                  className="w-full p-4 bg-white hover:bg-purple-50 border-2 border-gray-200 hover:border-purple-400 rounded-lg transition-all text-left"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-gray-900">{merchant.name}</p>
+                      <p className="text-xs text-gray-500 font-mono mt-1">
+                        {merchant.address.substring(0, 10)}...{merchant.address.substring(38)}
+                      </p>
+                    </div>
+                    <span className="text-2xl">{getCategoryIcon(merchant.category)}</span>
+                  </div>
+                </button>
+              ))
+            )}
           </div>
+        )}
 
-          {/* Merchant Selection */}
-          <div className="mb-4">
-            <label className="block text-white font-medium mb-2">Select Merchant</label>
-            <select
-              value={selectedMerchant?.id || ''}
-              onChange={(e) => {
-                const merchant = merchants.find(m => m.id === e.target.value);
-                setSelectedMerchant(merchant);
-              }}
-              disabled={isProcessing}
-              className="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-            >
-              <option value="">Choose a merchant...</option>
-              {merchants.map((merchant) => (
-                <option key={merchant.id} value={merchant.id}>
-                  {merchant.name} - {merchant.category}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Merchant Info */}
-          {selectedMerchant && (
-            <div className="mb-4 p-3 bg-blue-500/20 border border-blue-500/50 rounded-lg">
-              <h3 className="text-white font-semibold">{selectedMerchant.name}</h3>
-              <p className="text-white/70 text-sm mt-1">{selectedMerchant.category}</p>
-              {selectedMerchant.description && (
-                <p className="text-white/50 text-xs mt-2">{selectedMerchant.description}</p>
-              )}
+        {/* Step 3: Amount Entry */}
+        {step === 3 && selectedMerchant && (
+          <div>
+            {/* Selected Merchant Info */}
+            <div className="mb-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+              <p className="text-sm text-gray-600">Merchant:</p>
+              <p className="font-semibold text-gray-900">{selectedMerchant.name}</p>
+              <p className="text-xs text-gray-500 font-mono mt-1">
+                {selectedMerchant.address}
+              </p>
+              <p className="text-sm text-purple-700 mt-2">
+                Category: {getCategoryIcon(selectedCategory)} {selectedCategory}
+              </p>
             </div>
-          )}
 
-          {/* Amount Input */}
-          <div className="mb-4">
-            <label className="block text-white font-medium mb-2">Amount (RELIEF)</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              max={currentBalance}
-              value={spendAmount}
-              onChange={(e) => setSpendAmount(e.target.value)}
-              disabled={isProcessing}
-              placeholder="Enter amount"
-              className="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-            />
-            <small className="text-white/50 mt-1 block">
-              Available: {parseFloat(currentBalance).toFixed(2)} RELIEF
-            </small>
-          </div>
-
-          {/* Status */}
-          {txStatus && (
-            <div className="mb-4 p-3 bg-yellow-500/20 border border-yellow-500/50 rounded-lg">
-              <p className="text-yellow-200 text-sm">{txStatus}</p>
+            {/* Amount Input */}
+            <div className="mb-4">
+              <label className="block text-gray-700 font-medium mb-2">
+                Amount (RELIEF Tokens)
+              </label>
+              <input
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                disabled={isProcessing}
+                placeholder="Enter amount"
+                min="0"
+                step="0.01"
+                max={availableBalance}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent disabled:bg-gray-100"
+              />
             </div>
-          )}
 
-          {/* Action Buttons */}
-          <div className="flex gap-3">
-            <button
-              onClick={() => setShowMerchantModal(false)}
-              disabled={isProcessing}
-              className="flex-1 px-4 py-2 border border-white/20 text-white rounded-lg hover:bg-white/10 transition disabled:opacity-50"
-            >
-              Cancel
-            </button>
+            {/* Transaction Status */}
+            {txStatus && (
+              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <div className="flex items-center">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-600 mr-2"></div>
+                  <p className="text-sm text-yellow-800">{txStatus}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Spend Button */}
             <button
               onClick={handleSpend}
-              disabled={isProcessing || !selectedMerchant || !spendAmount || parseFloat(spendAmount) <= 0}
-              className="flex-1 px-4 py-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-lg hover:shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
+              disabled={isProcessing || !amount || parseFloat(amount) <= 0}
+              className="w-full bg-gradient-to-r from-purple-600 to-pink-600 text-white py-3 rounded-lg font-semibold hover:shadow-lg transition-shadow disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isProcessing ? '⏳ Processing...' : '💳 Spend Now'}
+              {isProcessing ? (
+                <span className="flex items-center justify-center">
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Processing...
+                </span>
+              ) : (
+                '🛒 Spend RELIEF Tokens'
+              )}
             </button>
+
+            <p className="text-xs text-gray-500 mt-3 text-center">
+              Spending is restricted by category and approved merchants
+            </p>
           </div>
-        </div>
+        )}
       </div>
-    );
-  }
+    </div>
 }
+
