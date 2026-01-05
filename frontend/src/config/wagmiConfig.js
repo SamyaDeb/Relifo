@@ -2,10 +2,14 @@ import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import { http } from 'wagmi';
 import { polygonAmoy } from 'wagmi/chains';
 
-// Use only Infura RPC
-const INFURA_RPC = 'https://polygon-amoy.infura.io/v3/a58ad7faa33f46e595aa0cc376f22dc1';
+// Alchemy RPC with fallback RPCs
+const RPC_URLS = [
+  'https://polygon-amoy.g.alchemy.com/v2/cLU2TJhufqp-aIR2sXjXt',  // Alchemy (Primary - Best)
+  'https://rpc-amoy.polygon.technology',                           // Official Polygon (Fallback 1)
+  'https://polygon-amoy-bor-rpc.publicnode.com',                   // PublicNode (Fallback 2)
+];
 
-// Define Polygon Amoy with Infura RPC
+// Define Polygon Amoy with Official RPC
 const customPolygonAmoy = {
   ...polygonAmoy,
   id: 80002,
@@ -18,10 +22,10 @@ const customPolygonAmoy = {
   },
   rpcUrls: {
     default: {
-      http: [INFURA_RPC],
+      http: RPC_URLS,
     },
     public: {
-      http: [INFURA_RPC],
+      http: RPC_URLS,
     },
   },
   blockExplorers: {
@@ -38,8 +42,8 @@ export const config = getDefaultConfig({
   projectId: 'YOUR_WALLETCONNECT_PROJECT_ID', // Get from https://cloud.walletconnect.com
   chains: [customPolygonAmoy],
   transports: {
-    // Use Infura RPC with retry logic
-    [customPolygonAmoy.id]: http(INFURA_RPC, {
+    // Use official Polygon RPC with fallback and retry logic
+    [customPolygonAmoy.id]: http(RPC_URLS[0], {
       batch: false, // Disable batching to avoid RPC errors
       retryCount: 5, // Retry failed requests 5 times
       retryDelay: 200, // Wait 200ms between retries

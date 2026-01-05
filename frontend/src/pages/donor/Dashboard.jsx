@@ -460,6 +460,11 @@ function BuyTokensModal({ onClose, onSuccess }) {
       return;
     }
 
+    if (!walletClient) {
+      alert('Wallet not connected. Please connect your wallet first.');
+      return;
+    }
+
     setIsProcessing(true);
     setTxStatus('Preparing transaction...');
 
@@ -794,8 +799,35 @@ function DonateModal({ campaign, onClose }) {
           account: address,
         });
         
-        setTxStatus('Waiting for approval confirmation...');
-        await client.waitForTransactionReceipt({ hash: approveTxHash });
+        console.log('✅ Approval tx sent:', approveTxHash);
+        setTxStatus('Waiting for approval confirmation (2 blocks)...');
+        
+        // Wait for 2 block confirmations
+        const approveReceipt = await client.waitForTransactionReceipt({ 
+          hash: approveTxHash,
+          confirmations: 2,
+          timeout: 60_000 // 60 seconds
+        });
+        
+        console.log('✅ Approval confirmed at block:', approveReceipt.blockNumber);
+        
+        // Verify allowance was actually updated
+        const newAllowance = await client.readContract({
+          address: tokenToUse,
+          abi: ReliefTokenABI,
+          functionName: 'allowance',
+          args: [address, campaign.blockchainAddress],
+        });
+        
+        console.log('✅ New allowance verified:', formatEther(newAllowance), 'RELIEF');
+        
+        if (newAllowance < amountInWei) {
+          throw new Error('Approval failed: Allowance not updated on-chain');
+        }
+        
+        // Wait for network to sync
+        setTxStatus('Syncing with network...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
 
       // Donate
@@ -807,8 +839,16 @@ function DonateModal({ campaign, onClose }) {
         args: [amountInWei],
       });
 
-      setTxStatus('Waiting for donation confirmation...');
-      const receipt = await client.waitForTransactionReceipt({ hash: donateTxHash });
+      console.log('✅ Donation tx sent:', donateTxHash);
+      setTxStatus('Waiting for donation confirmation (2 blocks)...');
+      
+      const receipt = await client.waitForTransactionReceipt({ 
+        hash: donateTxHash,
+        confirmations: 2,
+        timeout: 60_000 // 60 seconds
+      });
+      
+      console.log('✅ Donation confirmed at block:', receipt.blockNumber);
 
       // Update Firebase
       setTxStatus('Updating database...');
