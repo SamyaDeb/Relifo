@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useWalletClient, useAccount } from 'wagmi';
 import { getPublicClient } from '@wagmi/core';
 import { config } from '../config/wagmiConfig';
+import { isAddress, getAddress } from 'viem';
 import BeneficiaryWalletABI from '../contracts/BeneficiaryWallet.json';
 import { getPolygonScanUrl } from '../services/polygonService';
 
@@ -23,24 +24,82 @@ export default function ApproveMerchantModal({ beneficiaryWalletAddress, benefic
         return;
       }
 
+      // Validate merchant address format
+      if (!isAddress(merchantAddress)) {
+        alert('❌ Invalid Address\n\nPlease enter a valid Ethereum address (0x...)');
+        return;
+      }
+
+      // Validate beneficiary wallet address
+      if (!beneficiaryWalletAddress || !isAddress(beneficiaryWalletAddress)) {
+        alert('❌ Invalid Beneficiary Wallet\n\nBeneficiary wallet address is invalid.');
+        return;
+      }
+
       if (!walletClient) {
         alert('Please connect your wallet');
         return;
       }
 
       setIsProcessing(true);
-      setTxStatus('Checking merchant approval status...');
+      setTxStatus('Validating addresses...');
+
+      // Normalize addresses to checksummed format
+      const normalizedMerchantAddress = getAddress(merchantAddress);
+      const normalizedWalletAddress = getAddress(beneficiaryWalletAddress);
 
       const publicClient = getPublicClient(config, { chainId: 80002 });
       const categoryIndex = categories.indexOf(category);
 
-      // Check if already approved
-      const isApproved = await publicClient.readContract({
-        address: beneficiaryWalletAddress,
-        abi: BeneficiaryWalletABI.abi,
-        functionName: 'isMerchantApproved',
-        args: [merchantAddress, categoryIndex],
-      });
+      // Verify the beneficiary wallet contract exists
+      setTxStatus('Verifying beneficiary wallet...');
+      let code;
+      try {
+        code = await publicClient.getBytecode({
+          address: normalizedWalletAddress,
+        });
+        
+        if (!code || code === '0x') {
+          alert('❌ Invalid Beneficiary Wallet\n\nNo contract found at the beneficiary wallet address.\n\nThe beneficiary may not have received any allocations yet.');
+          setIsProcessing(false);
+          return;
+        }
+      } catch (error) {
+        console.error('Error checking contract:', error);
+        alert('❌ Cannot verify beneficiary wallet.\n\nPlease check your network connection and try again.');
+        setIsProcessing(false);
+        return;
+      }
+
+      setTxStatus('Checking merchant approval status...');
+
+      // Check if already approved with retry logic
+      let isApproved;
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      while (retryCount < maxRetries) {
+        try {
+          isApproved = await publicClient.readContract({
+            address: normalizedWalletAddress,
+            abi: BeneficiaryWalletABI.abi,
+            functionName: 'isMerchantApproved',
+            args: [normalizedMerchantAddress, categoryIndex],
+          });
+          break; // Success, exit retry loop
+        } catch (error) {
+          retryCount++;
+          console.warn(`Retry ${retryCount}/${maxRetries} - RPC call failed:`, error.message);
+          
+          if (retryCount >= maxRetries) {
+            console.error('Max retries reached:', error);
+            throw new Error('Unable to check merchant status. Please try again.');
+          }
+          
+          // Wait before retry (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+        }
+      }
 
       if (isApproved) {
         alert(`✅ Merchant Already Approved\n\nThis merchant is already approved for ${category} purchases.`);
@@ -49,8 +108,8 @@ export default function ApproveMerchantModal({ beneficiaryWalletAddress, benefic
       }
 
       console.log('🏪 Approving merchant:', {
-        beneficiaryWallet: beneficiaryWalletAddress,
-        merchant: merchantAddress,
+        beneficiaryWallet: normalizedWalletAddress,
+        merchant: normalizedMerchantAddress,
         merchantName: merchantName,
         category: category,
         categoryIndex: categoryIndex
@@ -59,10 +118,10 @@ export default function ApproveMerchantModal({ beneficiaryWalletAddress, benefic
       setTxStatus('Please confirm in MetaMask...');
 
       const txHash = await walletClient.writeContract({
-        address: beneficiaryWalletAddress,
+        address: normalizedWalletAddress,
         abi: BeneficiaryWalletABI.abi,
         functionName: 'approveMerchant',
-        args: [merchantAddress, categoryIndex],
+        args: [normalizedMerchantAddress, categoryIndex],
         account: address,
       });
 
