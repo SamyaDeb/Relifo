@@ -14,9 +14,12 @@ module.exports = {
   },
   networks: {
     amoy: {
-      url: process.env.POLYGON_RPC_URL || "https://rpc-amoy.polygon.technology",
+      url: process.env.POLYGON_RPC_URL || "https://polygon-amoy.g.alchemy.com/v2/cLU2TJhufqp-aIR2sXjXt",
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
       chainId: 80002,
+      timeout: 60000, // 60 second timeout
+      gas: "auto",
+      gasPrice: "auto",
     },
     localhost: {
       url: "http://127.0.0.1:8545",
