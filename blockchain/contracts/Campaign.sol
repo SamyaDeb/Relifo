@@ -69,6 +69,15 @@ contract Campaign is ReentrancyGuard, Pausable {
     /// @notice Mapping of beneficiary to their wallet contract
     mapping(address => address) public beneficiaryWallets;
     
+    /// @notice Mapping of beneficiary approval status (true = approved, false = pending/rejected)
+    mapping(address => bool) public approvedBeneficiaries;
+    
+    /// @notice Mapping to track if beneficiary has applied to this campaign
+    mapping(address => bool) public appliedBeneficiaries;
+    
+    /// @notice Array of all applied beneficiary addresses
+    address[] public appliedBeneficiaryList;
+    
     /// @notice List of all donors
     address[] public donors;
     
@@ -92,6 +101,15 @@ contract Campaign is ReentrancyGuard, Pausable {
         uint256 amount,
         uint256 timestamp
     );
+    
+    /// @notice Event emitted when beneficiary applies to campaign
+    event BeneficiaryApplied(address indexed beneficiary, uint256 timestamp);
+    
+    /// @notice Event emitted when beneficiary is approved
+    event BeneficiaryApproved(address indexed beneficiary, uint256 timestamp);
+    
+    /// @notice Event emitted when beneficiary is rejected
+    event BeneficiaryRejected(address indexed beneficiary, uint256 timestamp);
     
     /// @notice Event emitted when campaign status changes
     event StatusChanged(CampaignStatus newStatus, uint256 timestamp);
@@ -224,6 +242,7 @@ contract Campaign is ReentrancyGuard, Pausable {
     {
         require(beneficiary != address(0), "Campaign: Invalid beneficiary");
         require(amount > 0, "Campaign: Amount must be greater than 0");
+        require(approvedBeneficiaries[beneficiary], "Campaign: Beneficiary not approved");
         require(
             campaignInfo.raisedAmount >= totalAllocated + amount,
             "Campaign: Insufficient campaign balance"
@@ -231,12 +250,12 @@ contract Campaign is ReentrancyGuard, Pausable {
         
         // Create beneficiary wallet if doesn't exist
         if (beneficiaryWallets[beneficiary] == address(0)) {
-            BeneficiaryWallet wallet =,
-                factory new BeneficiaryWallet(
+            BeneficiaryWallet wallet = new BeneficiaryWallet(
                 beneficiary,
                 address(reliefToken),
                 address(this),
-                campaignInfo.organizer
+                campaignInfo.organizer,
+                factory
             );
             beneficiaryWallets[beneficiary] = address(wallet);
             beneficiaries.push(beneficiary);
@@ -370,5 +389,84 @@ contract Campaign is ReentrancyGuard, Pausable {
      */
     function getBeneficiaryWallet(address beneficiary) external view returns (address) {
         return beneficiaryWallets[beneficiary];
+    }
+
+    /**
+     * @notice Apply to campaign as beneficiary
+     * @dev Anyone can apply, organizer must approve
+     */
+    function applyAsBeneficiary() external {
+        require(!appliedBeneficiaries[msg.sender], "Campaign: Already applied");
+        
+        appliedBeneficiaries[msg.sender] = true;
+        appliedBeneficiaryList.push(msg.sender);
+        
+        emit BeneficiaryApplied(msg.sender, block.timestamp);
+    }
+
+    /**
+     * @notice Approve a beneficiary application
+     * @dev Only organizer or admin can approve
+     * @param beneficiary Address of beneficiary to approve
+     */
+    function approveBeneficiary(address beneficiary) external onlyOrganizerOrAdmin {
+        require(!approvedBeneficiaries[beneficiary], "Campaign: Already approved");
+        
+        // If beneficiary hasn't applied on-chain, add them to the list
+        if (!appliedBeneficiaries[beneficiary]) {
+            appliedBeneficiaries[beneficiary] = true;
+            appliedBeneficiaryList.push(beneficiary);
+        }
+        
+        approvedBeneficiaries[beneficiary] = true;
+        
+        emit BeneficiaryApproved(beneficiary, block.timestamp);
+    }
+
+    /**
+     * @notice Reject a beneficiary application
+     * @dev Only organizer or admin can reject
+     * @param beneficiary Address of beneficiary to reject
+     */
+    function rejectBeneficiary(address beneficiary) external onlyOrganizerOrAdmin {
+        // Remove from applied list (mark as not applied)
+        appliedBeneficiaries[beneficiary] = false;
+        approvedBeneficiaries[beneficiary] = false;
+        
+        emit BeneficiaryRejected(beneficiary, block.timestamp);
+    }
+
+    /**
+     * @notice Check if beneficiary is approved
+     * @param beneficiary Address to check
+     * @return True if approved
+     */
+    function isBeneficiaryApproved(address beneficiary) external view returns (bool) {
+        return approvedBeneficiaries[beneficiary];
+    }
+
+    /**
+     * @notice Check if beneficiary has applied
+     * @param beneficiary Address to check
+     * @return True if applied
+     */
+    function hasBeneficiaryApplied(address beneficiary) external view returns (bool) {
+        return appliedBeneficiaries[beneficiary];
+    }
+
+    /**
+     * @notice Get all applied beneficiaries
+     * @return Array of applied beneficiary addresses
+     */
+    function getAppliedBeneficiaries() external view returns (address[] memory) {
+        return appliedBeneficiaryList;
+    }
+
+    /**
+     * @notice Get count of applied beneficiaries
+     * @return Number of applications
+     */
+    function getAppliedBeneficiariesCount() external view returns (uint256) {
+        return appliedBeneficiaryList.length;
     }
 }
