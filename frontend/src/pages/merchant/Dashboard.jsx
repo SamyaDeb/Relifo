@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAccount } from 'wagmi';
 import { db } from '../../firebase/config';
 import { doc, getDoc, collection, query, where, onSnapshot, updateDoc, addDoc } from 'firebase/firestore';
@@ -8,11 +8,14 @@ import { getPublicClient } from '@wagmi/core';
 import { config } from '../../config/wagmiConfig';
 import { CONTRACTS } from '../../services/polygonService';
 import CampaignFactoryABI from '../../contracts/CampaignFactory.json';
+import ReliefTokenABI from '../../contracts/ReliefToken.json';
+import { useNotification } from '../../contexts/NotificationContext';
 
 export default function MerchantDashboard() {
   const { address } = useAccount();
   const navigate = useNavigate();
   const [merchantProfile, setMerchantProfile] = useState(null);
+  const [tokenBalance, setTokenBalance] = useState('0');
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [withdrawAmount, setWithdrawAmount] = useState('');
@@ -20,6 +23,8 @@ export default function MerchantDashboard() {
   const [activeTab, setActiveTab] = useState('overview');
   const [isVerifiedOnChain, setIsVerifiedOnChain] = useState(false);
   const [checkingVerification, setCheckingVerification] = useState(true);
+  const { showNotification } = useNotification();
+  const lastTransactionCount = useRef(0);
 
   // Check merchant verification on blockchain
   useEffect(() => {
@@ -49,6 +54,29 @@ export default function MerchantDashboard() {
 
     checkBlockchainVerification();
   }, [address]);
+
+  // Load RELIEF token balance from blockchain
+  const loadTokenBalance = async () => {
+    if (!address) return;
+    
+    try {
+      const publicClient = getPublicClient(config, { chainId: 80002 });
+      
+      const balance = await publicClient.readContract({
+        address: CONTRACTS.reliefToken,
+        abi: ReliefTokenABI.abi,
+        functionName: 'balanceOf',
+        args: [address]
+      });
+      
+      const formattedBalance = formatEther(balance);
+      console.log('💰 Merchant RELIEF balance:', formattedBalance);
+      setTokenBalance(formattedBalance);
+    } catch (error) {
+      console.error('❌ Error loading token balance:', error);
+      setTokenBalance('0');
+    }
+  };
 
   useEffect(() => {
     if (!address) {
@@ -80,13 +108,41 @@ export default function MerchantDashboard() {
         ...doc.data()
       }));
       txData.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      
+      // Check for new transactions (show notification)
+      if (lastTransactionCount.current > 0 && txData.length > lastTransactionCount.current) {
+        const newTransaction = txData[0]; // Most recent
+        showNotification({
+          type: 'success',
+          message: {
+            title: '💰 New Payment Received!',
+            description: `${newTransaction.amount} RELIEF from beneficiary`,
+            txHash: newTransaction.transactionHash,
+          },
+          duration: 10000,
+        });
+      }
+      
+      lastTransactionCount.current = txData.length;
       setTransactions(txData);
     });
 
     loadProfile();
+    loadTokenBalance();
 
     return () => unsubscribe();
-  }, [address, navigate]);
+  }, [address, navigate, showNotification]);
+
+  // Reload token balance every 10 seconds
+  useEffect(() => {
+    if (!address) return;
+    
+    const interval = setInterval(() => {
+      loadTokenBalance();
+    }, 10000); // 10 seconds
+    
+    return () => clearInterval(interval);
+  }, [address]);
 
   const handleWithdraw = async () => {
     if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
@@ -95,32 +151,32 @@ export default function MerchantDashboard() {
     }
 
     const amount = parseFloat(withdrawAmount);
-    if (amount > merchantProfile.balance) {
-      alert('Insufficient balance');
+    const currentBalance = parseFloat(tokenBalance);
+    
+    if (amount > currentBalance) {
+      alert(`Insufficient balance.\n\nAvailable: ${currentBalance.toFixed(2)} RELIEF\nRequested: ${amount} RELIEF`);
       return;
     }
 
+    alert('Note: Withdraw functionality requires smart contract integration to transfer tokens from your wallet. Currently showing balance only.');
+    
     setWithdrawing(true);
     try {
-      // Update balance in Firestore
-      const newBalance = merchantProfile.balance - amount;
-      await updateDoc(doc(db, 'merchant_profile', address.toLowerCase()), {
-        balance: newBalance,
-        updatedAt: new Date().toISOString()
-      });
-
       // Record withdrawal transaction
       await addDoc(collection(db, 'merchant_transactions'), {
         merchantAddress: address.toLowerCase(),
         type: 'withdrawal',
         amount: amount,
-        status: 'completed',
-        createdAt: new Date().toISOString()
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        note: 'Merchant can manually transfer tokens from their wallet'
       });
 
-      setMerchantProfile({ ...merchantProfile, balance: newBalance });
       setWithdrawAmount('');
-      alert(`✅ Successfully withdrawn ${amount} RELIEF tokens to your wallet!`);
+      alert(`✅ Withdrawal request recorded for ${amount} RELIEF tokens!\n\nYou can manually transfer tokens from your wallet: ${address}`);
+      
+      // Reload balance after withdrawal
+      setTimeout(() => loadTokenBalance(), 2000);
     } catch (error) {
       console.error('Withdrawal error:', error);
       alert('Failed to process withdrawal. Please try again.');
@@ -163,7 +219,7 @@ export default function MerchantDashboard() {
   const stats = [
     {
       label: 'Available Balance',
-      value: `${merchantProfile.balance?.toFixed(2) || '0.00'} RELIEF`,
+      value: `${parseFloat(tokenBalance).toFixed(2)} RELIEF`,
       icon: '💰',
       color: 'bg-green-100 text-green-700',
       trend: '+12.5%'
@@ -368,7 +424,8 @@ export default function MerchantDashboard() {
                 
                 <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl p-6 mb-6">
                   <p className="text-sm opacity-90 mb-1">Available Balance</p>
-                  <p className="text-3xl font-bold">{merchantProfile.balance?.toFixed(2) || '0.00'} RELIEF</p>
+                  <p className="text-3xl font-bold">{parseFloat(tokenBalance).toFixed(2)} RELIEF</p>
+                  <p className="text-xs opacity-75 mt-1">On-chain balance</p>
                 </div>
 
                 <div className="space-y-4">
@@ -381,7 +438,7 @@ export default function MerchantDashboard() {
                         type="number"
                         step="0.01"
                         min="0"
-                        max={merchantProfile.balance || 0}
+                        max={parseFloat(tokenBalance)}
                         value={withdrawAmount}
                         onChange={(e) => setWithdrawAmount(e.target.value)}
                         className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-orange-500 focus:outline-none"

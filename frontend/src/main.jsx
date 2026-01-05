@@ -4,6 +4,7 @@ import { WagmiProvider } from 'wagmi'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RainbowKitProvider } from '@rainbow-me/rainbowkit'
 import { config } from './config/wagmiConfig'
+import { NotificationProvider } from './contexts/NotificationContext'
 import './index.css'
 import '@rainbow-me/rainbowkit/styles.css'
 import App from './App.jsx'
@@ -15,7 +16,9 @@ createRoot(document.getElementById('root')).render(
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider>
-          <App />
+          <NotificationProvider>
+            <App />
+          </NotificationProvider>
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>

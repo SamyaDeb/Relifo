@@ -1,3 +1,56 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer utilities {
+  @keyframes slideInFromLeft {
+    from {
+      transform: translateX(-100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes shrink {
+    from {
+      width: 100%;
+    }
+    to {
+      width: 0%;
+    }
+  }
+
+  .animate-slideInFromLeft {
+    animation: slideInFromLeft 0.3s ease-out forwards;
+  }
+
+  .animate-shrink {
+    animation: shrink linear forwards;
+  }
+}
+
+@media print {
+  .receipt-print {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+  
+  body * {
+    visibility: hidden;
+  }
+  
+  .receipt-print,
+  .receipt-print * {
+    visibility: visible;
+  }
+  
+  .receipt-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}

@@ -9,8 +9,11 @@ import { config } from '../../config/wagmiConfig';
 import ReliefTokenABI from '../../contracts/ReliefToken.json';
 import BeneficiaryWalletABI from '../../contracts/BeneficiaryWallet.json';
 import CampaignABI from '../../contracts/Campaign.json';
+import CampaignFactoryABI from '../../contracts/CampaignFactory.json';
 import MerchantRegistryABI from '../../contracts/MerchantRegistry.json';
 import { CONTRACTS, getPolygonScanUrl, parseContractError } from '../../services/polygonService';
+import { useNotification } from '../../contexts/NotificationContext';
+import TransactionReceipt from '../../components/TransactionReceipt';
 
 export default function BeneficiaryDashboard() {
   const [contractWalletAddress, setContractWalletAddress] = useState(null);
@@ -25,9 +28,12 @@ export default function BeneficiaryDashboard() {
   const [campaignTokenAddress, setCampaignTokenAddress] = useState(null); // Token address from campaign
   const [merchants, setMerchants] = useState([]);
   const [spendingHistory, setSpendingHistory] = useState([]);
+  const [showReceipt, setShowReceipt] = useState(false);
+  const [receiptData, setReceiptData] = useState(null);
   const { address } = useAccount();
   const { disconnect } = useDisconnect();
   const { data: walletClient } = useWalletClient();
+  const { showNotification } = useNotification();
   const navigate = useNavigate();
 
   // Load beneficiary wallet and balance from blockchain
@@ -248,16 +254,39 @@ export default function BeneficiaryDashboard() {
     if (!db) return;
 
     try {
-      const merchantsRef = collection(db, 'merchants');
-      const q = query(merchantsRef, where('isActive', '==', true));
+      const merchantsRef = collection(db, 'merchant_profile');
       
-      const unsubscribe = onSnapshot(q, (snapshot) => {
+      const unsubscribe = onSnapshot(merchantsRef, async (snapshot) => {
         const merchantList = snapshot.docs.map(doc => ({
           id: doc.id,
+          address: doc.id, // The doc ID is the wallet address
           ...doc.data()
         }));
-        console.log('🏪 Merchants loaded:', merchantList.length);
-        setMerchants(merchantList);
+
+        // Check blockchain verification status for each merchant
+        const publicClient = getPublicClient(config, { chainId: 80002 });
+        const verifiedMerchants = await Promise.all(
+          merchantList.map(async (merchant) => {
+            if (!merchant.walletAddress) {
+              return { ...merchant, isActive: false };
+            }
+            try {
+              const isVerified = await publicClient.readContract({
+                address: CONTRACTS.campaignFactory,
+                abi: CampaignFactoryABI.abi,
+                functionName: 'isVerifiedMerchant',
+                args: [merchant.walletAddress]
+              });
+              return { ...merchant, isActive: isVerified };
+            } catch (error) {
+              console.error('Error checking merchant verification:', error);
+              return { ...merchant, isActive: false };
+            }
+          })
+        );
+
+        console.log('🏪 Merchants loaded:', verifiedMerchants.length, 'verified:', verifiedMerchants.filter(m => m.isActive).length);
+        setMerchants(verifiedMerchants);
       });
 
       return unsubscribe;
@@ -679,6 +708,7 @@ export default function BeneficiaryDashboard() {
           animation: float linear infinite;
         }
 
+
         @keyframes border-orbit {
           0% {
             offset-distance: 0%;
@@ -709,6 +739,14 @@ export default function BeneficiaryDashboard() {
           background: rgba(255, 255, 255, 0.3);
         }
       `}</style>
+
+      {/* Transaction Receipt Modal */}
+      {showReceipt && receiptData && (
+        <TransactionReceipt
+          transaction={receiptData}
+          onClose={() => setShowReceipt(false)}
+        />
+      )}
     </div>
   );
 
@@ -785,9 +823,24 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
   const merchants = merchantsProp || [];
 
   // Filter merchants by selected category
-  const filteredMerchants = merchants.filter(m => 
-    m.category === selectedCategory && m.isActive
-  );
+  // Only check if merchant is verified by admin and supports the category
+  const filteredMerchants = merchants.filter(m => {
+    if (!m.isActive) return false; // isActive means blockchain-verified by admin
+    if (!m.categories || !Array.isArray(m.categories)) return false;
+    
+    // Map beneficiary categories to merchant categories
+    const categoryMap = {
+      'Food': 'Food',
+      'Medicine': 'Medicine',
+      'Shelter': 'Shelter Materials',
+      'Education': 'Education Supplies',
+      'Clothing': 'Clothing',
+      'Other': 'Other Essentials'
+    };
+    
+    const merchantCategory = categoryMap[selectedCategory];
+    return m.categories.includes(merchantCategory) || m.categories.includes(selectedCategory);
+  });
 
   const handleCategorySelect = (cat) => {
     setSelectedCategory(cat);
@@ -831,11 +884,13 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
 
       const amountInWei = parseEther(amount);
       const publicClient = getPublicClient(config);
+      const merchantAddress = selectedMerchant.walletAddress || selectedMerchant.id;
+      const merchantName = selectedMerchant.businessName || selectedMerchant.name || 'Unknown Merchant';
 
       console.log('🛒 Spending:', {
         wallet: walletAddress,
-        merchant: selectedMerchant.address,
-        merchantName: selectedMerchant.name,
+        merchant: merchantAddress,
+        merchantName: merchantName,
         amount: amount,
         category: selectedCategory
       });
@@ -843,23 +898,8 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
       // Map category to Category enum (0 = Food, 1 = Medicine, etc.)
       const categoryIndex = categories.indexOf(selectedCategory);
 
-      // Check if merchant is approved for this category
-      setTxStatus('Verifying merchant approval...');
-      const isApproved = await publicClient.readContract({
-        address: walletAddress,
-        abi: BeneficiaryWalletABI.abi,
-        functionName: 'isMerchantApproved',
-        args: [selectedMerchant.address, categoryIndex],
-      });
-
-      if (!isApproved) {
-        setIsProcessing(false);
-        alert(`❌ Merchant Not Approved\n\nThis merchant (${selectedMerchant.name}) is not approved for ${selectedCategory} purchases.\n\n📋 To spend at this merchant:\n1. Request merchant approval from your organizer\n2. Contact: Your campaign organizer\n3. Provide: Merchant address and category\n\nMerchant Address:\n${selectedMerchant.address}\n\nCategory: ${selectedCategory} (${categoryIndex})`);
-        return;
-      }
-
       // Prepare description (merchant name and category)
-      const description = `Purchase from ${selectedMerchant.name} - ${selectedCategory}`;
+      const description = `Purchase from ${merchantName} - ${selectedCategory}`;
 
       setTxStatus('Preparing spending transaction...');
 
@@ -869,7 +909,7 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
           address: walletAddress,
           abi: BeneficiaryWalletABI.abi,
           functionName: 'spend',
-          args: [selectedMerchant.address, amountInWei, categoryIndex, description],
+          args: [merchantAddress, amountInWei, categoryIndex, description],
           account: address,
         });
         console.log('✅ Gas estimation successful:', gasEstimate);
@@ -880,8 +920,10 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
           errorMsg = 'Only the beneficiary can spend these funds';
         } else if (gasError.message?.includes('Insufficient balance')) {
           errorMsg = 'Insufficient balance in wallet';
-        } else if (gasError.message?.includes('not approved')) {
-          errorMsg = 'Merchant not approved for this category. Please contact your organizer to approve this merchant.';
+        } else if (gasError.message?.includes('not verified')) {
+          errorMsg = 'Merchant not verified by admin. Please contact the admin to verify this merchant.';
+        } else if (gasError.message?.includes('category limit')) {
+          errorMsg = 'Amount exceeds category spending limit';
         } else if (gasError.shortMessage) {
           errorMsg = gasError.shortMessage;
         }
@@ -894,7 +936,7 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
         address: walletAddress,
         abi: BeneficiaryWalletABI.abi,
         functionName: 'spend',
-        args: [selectedMerchant.address, amountInWei, categoryIndex, description],
+        args: [merchantAddress, amountInWei, categoryIndex, description],
         account: address,
       });
 
@@ -911,8 +953,8 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
           await addDoc(collection(db, 'spending'), {
             beneficiaryId: address.toLowerCase(),
             walletAddress: walletAddress,
-            merchantAddress: selectedMerchant.address,
-            merchantName: selectedMerchant.name,
+            merchantAddress: merchantAddress,
+            merchantName: merchantName,
             amount: parseFloat(amount),
             category: selectedCategory,
             txHash: txHash,
@@ -925,8 +967,8 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
           // Also add to transactions collection
           await addDoc(collection(db, 'transactions'), {
             beneficiaryAddress: address.toLowerCase(),
-            merchantAddress: selectedMerchant.address.toLowerCase(),
-            merchantName: selectedMerchant.name,
+            merchantAddress: merchantAddress.toLowerCase(),
+            merchantName: merchantName,
             amount: parseFloat(amount),
             transactionHash: txHash,
             blockNumber: receipt.blockNumber.toString(),
@@ -934,13 +976,53 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
             type: 'spending',
             timestamp: new Date().toISOString(),
           });
+
+          // Add to merchant_transactions for merchant dashboard
+          await addDoc(collection(db, 'merchant_transactions'), {
+            merchantAddress: merchantAddress.toLowerCase(),
+            beneficiaryAddress: address.toLowerCase(),
+            amount: parseFloat(amount),
+            category: selectedCategory,
+            type: 'payment',
+            status: 'confirmed',
+            transactionHash: txHash,
+            blockNumber: receipt.blockNumber.toString(),
+            description: `Payment from beneficiary - ${selectedCategory}`,
+            createdAt: new Date().toISOString(),
           });
         }
       } catch (dbError) {
         console.warn('⚠️ Firebase update failed (blockchain transaction succeeded):', dbError);
       }
 
-      alert(`✅ Successfully spent ${amount} RELIEF tokens!\n\nMerchant: ${selectedMerchant.name}\nCategory: ${selectedCategory}\n\nTransaction: ${txHash.substring(0, 10)}...`);
+      // Prepare receipt data
+      const transactionData = {
+        transactionHash: txHash,
+        merchantName: merchantName,
+        merchantAddress: merchantAddress,
+        beneficiaryAddress: address,
+        amount: amount,
+        category: selectedCategory,
+        timestamp: new Date().toISOString(),
+        blockNumber: receipt.blockNumber.toString(),
+        status: 'Confirmed',
+      };
+
+      setReceiptData(transactionData);
+
+      // Show success notification with receipt button
+      showNotification({
+        type: 'success',
+        message: {
+          title: '✅ Payment Successful!',
+          description: `Paid ${amount} RELIEF to ${merchantName}`,
+          txHash: txHash,
+        },
+        duration: 8000,
+        showReceipt: () => {
+          setShowReceipt(true);
+        },
+      });
 
       // Reload balance
       if (onSuccess) {
@@ -951,7 +1033,16 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
     } catch (error) {
       console.error('Spending error:', error);
       const errorMsg = parseContractError(error);
-      alert(`❌ Spending failed:\n\n${errorMsg || error.message || error}`);
+      
+      // Show error notification
+      showNotification({
+        type: 'error',
+        message: {
+          title: '❌ Payment Failed',
+          description: errorMsg || error.message || 'Transaction failed',
+        },
+        duration: 6000,
+      });
     } finally {
       setIsProcessing(false);
       setTxStatus('');
@@ -1019,11 +1110,19 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
             </p>
             {filteredMerchants.length === 0 ? (
               <div className="p-6 bg-yellow-50 border border-yellow-200 rounded-lg text-center">
-                <p className="text-yellow-800">
-                  ⚠️ No approved merchants found for {selectedCategory}.
+                <p className="text-yellow-800 font-semibold mb-2">
+                  ⚠️ No verified merchants found for {selectedCategory}
                 </p>
-                <p className="text-sm text-yellow-700 mt-2">
-                  Please contact your organizer to approve merchants.
+                <p className="text-sm text-yellow-700 mt-3">
+                  There are no admin-verified merchants that support this category yet.
+                </p>
+                <div className="mt-4 p-3 bg-white rounded-lg text-left text-xs text-gray-600">
+                  <p className="font-semibold mb-1">Requirements:</p>
+                  <p>✓ Merchant must be verified by admin</p>
+                  <p>✓ Merchant must support "{selectedCategory}" category</p>
+                </div>
+                <p className="text-sm text-yellow-700 mt-3 font-medium">
+                  📞 Contact the admin to verify merchants for this category
                 </p>
               </div>
             ) : (
@@ -1035,12 +1134,12 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
                 >
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-semibold text-gray-900">{merchant.name}</p>
+                      <p className="font-semibold text-gray-900">{merchant.businessName || merchant.name || 'Unknown Merchant'}</p>
                       <p className="text-xs text-gray-500 font-mono mt-1">
-                        {merchant.address.substring(0, 10)}...{merchant.address.substring(38)}
+                        {(merchant.walletAddress || merchant.id).substring(0, 10)}...{(merchant.walletAddress || merchant.id).substring(38)}
                       </p>
                     </div>
-                    <span className="text-2xl">{getCategoryIcon(merchant.category)}</span>
+                    <span className="text-2xl">{getCategoryIcon(selectedCategory)}</span>
                   </div>
                 </button>
               ))
@@ -1054,9 +1153,9 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
             {/* Selected Merchant Info */}
             <div className="mb-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
               <p className="text-sm text-gray-600">Merchant:</p>
-              <p className="font-semibold text-gray-900">{selectedMerchant.name}</p>
+              <p className="font-semibold text-gray-900">{selectedMerchant.businessName || selectedMerchant.name || 'Unknown Merchant'}</p>
               <p className="text-xs text-gray-500 font-mono mt-1">
-                {selectedMerchant.address}
+                {selectedMerchant.walletAddress || selectedMerchant.id}
               </p>
               <p className="text-sm text-purple-700 mt-2">
                 Category: {getCategoryIcon(selectedCategory)} {selectedCategory}
@@ -1117,5 +1216,5 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
         )}
       </div>
     </div>
+  );
 }
-
