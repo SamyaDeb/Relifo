@@ -45,17 +45,56 @@ async function main() {
   console.log("\n💰 Step 1: Donating 500 RELIEF (OLD token) to campaign...");
   const donateAmount = ethers.parseEther("500");
   
+  if (adminBalance < donateAmount) {
+    console.error("❌ CRITICAL: Admin doesn't have enough tokens!");
+    console.error("Required:", ethers.formatEther(donateAmount), "RELIEF");
+    console.error("Available:", ethers.formatEther(adminBalance), "RELIEF");
+    process.exit(1);
+  }
+  
+  // Check current allowance
+  const currentAllowance = await token.allowance(signer.address, CAMPAIGN_ADDRESS);
+  console.log("Current allowance:", ethers.formatEther(currentAllowance), "RELIEF");
+  
   // Approve first
   console.log("Approving OLD tokens...");
   const approveTx = await token.approve(CAMPAIGN_ADDRESS, donateAmount);
-  await approveTx.wait();
-  console.log("✅ Approved");
+  console.log("Approval tx sent:", approveTx.hash);
+  
+  // Wait for 2 confirmations
+  const approveReceipt = await approveTx.wait(2);
+  console.log("✅ Approval confirmed at block:", approveReceipt.blockNumber);
+  
+  // Verify allowance was updated
+  const newAllowance = await token.allowance(signer.address, CAMPAIGN_ADDRESS);
+  console.log("✅ New allowance verified:", ethers.formatEther(newAllowance), "RELIEF");
+  
+  if (newAllowance < donateAmount) {
+    console.error("❌ CRITICAL: Allowance not updated on-chain!");
+    console.error("Expected:", ethers.formatEther(donateAmount), "RELIEF");
+    console.error("Actual:", ethers.formatEther(newAllowance), "RELIEF");
+    process.exit(1);
+  }
+  
+  // Wait for network to sync
+  console.log("Waiting for network to sync...");
+  await new Promise(resolve => setTimeout(resolve, 3000));
   
   // Donate
   console.log("Donating...");
-  const donateTx = await campaign.donate(donateAmount);
-  await donateTx.wait();
-  console.log("✅ Donated 500 RELIEF");
+  try {
+    const donateTx = await campaign.donate(donateAmount);
+    console.log("Donation tx sent:", donateTx.hash);
+    
+    const donateReceipt = await donateTx.wait(2);
+    console.log("✅ Donation confirmed at block:", donateReceipt.blockNumber);
+  } catch (error) {
+    console.error("❌ DONATION FAILED:");
+    console.error("Error:", error.message);
+    if (error.reason) console.error("Reason:", error.reason);
+    if (error.data) console.error("Data:", error.data);
+    process.exit(1);
+  }
   
   // Refresh campaign info
   info = await campaign.campaignInfo();
