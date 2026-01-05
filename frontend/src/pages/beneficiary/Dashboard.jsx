@@ -9,6 +9,7 @@ import { config } from '../../config/wagmiConfig';
 import ReliefTokenABI from '../../contracts/ReliefToken.json';
 import BeneficiaryWalletABI from '../../contracts/BeneficiaryWallet.json';
 import CampaignABI from '../../contracts/Campaign.json';
+import MerchantRegistryABI from '../../contracts/MerchantRegistry.json';
 import { CONTRACTS, getPolygonScanUrl, parseContractError } from '../../services/polygonService';
 
 export default function BeneficiaryDashboard() {
@@ -18,12 +19,16 @@ export default function BeneficiaryDashboard() {
   const [spentAmount, setSpentAmount] = useState('0');
   const [transactions, setTransactions] = useState([]);
   const [showSpendModal, setShowSpendModal] = useState(false);
+  const [showMerchantModal, setShowMerchantModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [campaign, setCampaign] = useState(null);
   const [userData, setUserData] = useState(null);
   const [campaignTokenAddress, setCampaignTokenAddress] = useState(null); // Token address from campaign
+  const [merchants, setMerchants] = useState([]);
+  const [spendingHistory, setSpendingHistory] = useState([]);
   const { address } = useAccount();
   const { disconnect } = useDisconnect();
+  const { data: walletClient } = useWalletClient();
   const navigate = useNavigate();
 
   // Load beneficiary wallet and balance from blockchain
@@ -239,6 +244,148 @@ export default function BeneficiaryDashboard() {
     return () => clearInterval(interval);
   }, [contractWalletAddress]);
 
+  // Load merchants from Firebase
+  useEffect(() => {
+    if (!db) return;
+
+    try {
+      const merchantsRef = collection(db, 'merchants');
+      const q = query(merchantsRef, where('isActive', '==', true));
+      
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const merchantList = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        console.log('🏪 Merchants loaded:', merchantList.length);
+        setMerchants(merchantList);
+      });
+
+      return unsubscribe;
+    } catch (error) {
+      console.error('Error fetching merchants:', error);
+    }
+  }, []);
+
+  // Load spending history from Firebase
+  useEffect(() => {
+    if (!address || !db) return;
+
+    try {
+      const transactionsRef = collection(db, 'transactions');
+      const q = query(
+        transactionsRef,
+        where('beneficiaryAddress', '==', address.toLowerCase()),
+        where('type', '==', 'spending')
+      );
+      
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const txs = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        
+        setSpendingHistory(txs);
+        console.log('📜 Spending history loaded:', txs.length);
+      });
+
+      return unsubscribe;
+    } catch (error) {
+      console.error('Error fetching spending history:', error);
+    }
+  }, [address]);
+
+  // Handle spending with merchant
+  const handleSpendWithMerchant = async (merchant, amount) => {
+    if (!walletClient) {
+      alert('Please connect your wallet first');
+      return;
+    }
+
+    if (!contractWalletAddress) {
+      alert('Beneficiary wallet not found');
+      return;
+    }
+
+    if (parseFloat(amount) > parseFloat(currentBalance)) {
+      alert('Insufficient balance');
+      return;
+    }
+
+    try {
+      const amountInWei = parseEther(amount);
+
+      console.log('=== Spending Transaction ===');
+      console.log('Beneficiary address:', address);
+      console.log('Merchant:', merchant.name);
+      console.log('Merchant address:', merchant.address);
+      console.log('Amount:', amount, 'RELIEF');
+
+      const publicClient = getPublicClient(config);
+      const tokenToUse = campaignTokenAddress || CONTRACTS.reliefToken;
+
+      // Step 1: Estimate gas
+      console.log('📊 Estimating gas...');
+      try {
+        const gasEstimate = await publicClient.estimateContractGas({
+          address: tokenToUse,
+          abi: ReliefTokenABI.abi,
+          functionName: 'transfer',
+          args: [merchant.address, amountInWei],
+          account: address,
+        });
+        console.log('✅ Gas estimate:', gasEstimate.toString());
+      } catch (estimateError) {
+        console.error('❌ Gas estimation failed:', estimateError.message);
+        throw new Error('Transaction would fail: ' + estimateError.shortMessage);
+      }
+
+      // Step 2: Send transaction
+      console.log('💰 Sending spending transaction...');
+      const hash = await walletClient.writeContract({
+        address: tokenToUse,
+        abi: ReliefTokenABI.abi,
+        functionName: 'transfer',
+        args: [merchant.address, amountInWei],
+      });
+
+      console.log('✅ Spending tx sent:', hash);
+
+      // Step 3: Wait for confirmation
+      const receipt = await publicClient.waitForTransactionReceipt({
+        hash,
+        confirmations: 2,
+        timeout: 60_000,
+      });
+
+      console.log('✅ Spending confirmed at block:', receipt.blockNumber);
+
+      // Step 4: Record in Firebase
+      await addDoc(collection(db, 'transactions'), {
+        beneficiaryAddress: address.toLowerCase(),
+        merchantAddress: merchant.address.toLowerCase(),
+        merchantName: merchant.name,
+        amount: parseFloat(amount),
+        transactionHash: hash,
+        blockNumber: receipt.blockNumber.toString(),
+        status: 'confirmed',
+        type: 'spending',
+        timestamp: new Date().toISOString(),
+      });
+
+      console.log('📝 Transaction recorded in database');
+
+      // Refresh balance
+      await loadWalletBalance(contractWalletAddress);
+
+      alert(`✅ Successfully spent ${amount} RELIEF with ${merchant.name}!\n\nTransaction: ${hash}`);
+      setShowMerchantModal(false);
+
+    } catch (error) {
+      console.error('❌ Spending failed:', error.message);
+      alert(`Spending failed: ${error.message}`);
+    }
+  };
+
   const handleDisconnect = () => {
     disconnect();
     navigate('/');
@@ -453,17 +600,26 @@ export default function BeneficiaryDashboard() {
               </div>
             )}
 
-            {/* Action Button */}
+            {/* Action Buttons */}
             <div className="glass-card border border-white/20 rounded-3xl p-5 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all mb-4 flex-shrink-0">
-              <button
-                onClick={() => setShowSpendModal(true)}
-                disabled={parseFloat(currentBalance) <= 0}
-                className="w-full group relative flex cursor-pointer items-center justify-center whitespace-nowrap border border-white/10 px-6 py-4 text-white bg-gradient-to-r from-green-500 to-emerald-500 rounded-[100px] transform-gpu transition-transform duration-300 ease-in-out active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <span className="relative z-20 text-lg font-semibold">🛒 Spend RELIEF Tokens</span>
-              </button>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <button
+                  onClick={() => setShowSpendModal(true)}
+                  disabled={parseFloat(currentBalance) <= 0}
+                  className="group relative flex cursor-pointer items-center justify-center whitespace-nowrap border border-white/10 px-6 py-4 text-white bg-gradient-to-r from-green-500 to-emerald-500 rounded-[100px] transform-gpu transition-transform duration-300 ease-in-out active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span className="relative z-20 text-lg font-semibold">🛒 Spend</span>
+                </button>
+                <button
+                  onClick={() => setShowMerchantModal(true)}
+                  disabled={parseFloat(currentBalance) <= 0 || merchants.length === 0}
+                  className="group relative flex cursor-pointer items-center justify-center whitespace-nowrap border border-white/10 px-6 py-4 text-white bg-gradient-to-r from-blue-500 to-cyan-500 rounded-[100px] transform-gpu transition-transform duration-300 ease-in-out active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span className="relative z-20 text-lg font-semibold">🏪 Merchant</span>
+                </button>
+              </div>
               <p className="text-xs text-white/50 mt-3 text-center">
-                Current Balance: {parseFloat(currentBalance).toFixed(2)} RELIEF
+                Balance: {parseFloat(currentBalance).toFixed(2)} RELIEF
               </p>
             </div>
 
@@ -508,6 +664,9 @@ export default function BeneficiaryDashboard() {
 
       {/* Spend Modal */}
       {showSpendModal && <SpendModal />}
+
+      {/* Merchant Spending Modal */}
+      {showMerchantModal && <MerchantSpendingModal />}
 
       {/* CSS Animations */}
       <style jsx>{`
@@ -899,4 +1058,126 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
       </div>
     </div>
   );
+
+  // Merchant Spending Modal Component
+  function MerchantSpendingModal() {
+    const [selectedMerchant, setSelectedMerchant] = useState(null);
+    const [spendAmount, setSpendAmount] = useState('');
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [txStatus, setTxStatus] = useState('');
+
+    const handleSpend = async () => {
+      if (!selectedMerchant || !spendAmount) {
+        alert('Please select a merchant and enter amount');
+        return;
+      }
+
+      setIsProcessing(true);
+      setTxStatus('Processing transaction...');
+
+      try {
+        await handleSpendWithMerchant(selectedMerchant, spendAmount);
+        setSpendAmount('');
+        setSelectedMerchant(null);
+        setTxStatus('');
+        setIsProcessing(false);
+      } catch (error) {
+        console.error('Error:', error);
+        setTxStatus('');
+        setIsProcessing(false);
+      }
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="glass-card border border-white/20 rounded-3xl p-6 max-w-md w-full bg-black/90 backdrop-blur-md">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-white">💳 Spend with Merchant</h2>
+            <button
+              onClick={() => setShowMerchantModal(false)}
+              className="text-white/60 hover:text-white transition"
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Merchant Selection */}
+          <div className="mb-4">
+            <label className="block text-white font-medium mb-2">Select Merchant</label>
+            <select
+              value={selectedMerchant?.id || ''}
+              onChange={(e) => {
+                const merchant = merchants.find(m => m.id === e.target.value);
+                setSelectedMerchant(merchant);
+              }}
+              disabled={isProcessing}
+              className="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+            >
+              <option value="">Choose a merchant...</option>
+              {merchants.map((merchant) => (
+                <option key={merchant.id} value={merchant.id}>
+                  {merchant.name} - {merchant.category}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Merchant Info */}
+          {selectedMerchant && (
+            <div className="mb-4 p-3 bg-blue-500/20 border border-blue-500/50 rounded-lg">
+              <h3 className="text-white font-semibold">{selectedMerchant.name}</h3>
+              <p className="text-white/70 text-sm mt-1">{selectedMerchant.category}</p>
+              {selectedMerchant.description && (
+                <p className="text-white/50 text-xs mt-2">{selectedMerchant.description}</p>
+              )}
+            </div>
+          )}
+
+          {/* Amount Input */}
+          <div className="mb-4">
+            <label className="block text-white font-medium mb-2">Amount (RELIEF)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              max={currentBalance}
+              value={spendAmount}
+              onChange={(e) => setSpendAmount(e.target.value)}
+              disabled={isProcessing}
+              placeholder="Enter amount"
+              className="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+            />
+            <small className="text-white/50 mt-1 block">
+              Available: {parseFloat(currentBalance).toFixed(2)} RELIEF
+            </small>
+          </div>
+
+          {/* Status */}
+          {txStatus && (
+            <div className="mb-4 p-3 bg-yellow-500/20 border border-yellow-500/50 rounded-lg">
+              <p className="text-yellow-200 text-sm">{txStatus}</p>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex gap-3">
+            <button
+              onClick={() => setShowMerchantModal(false)}
+              disabled={isProcessing}
+              className="flex-1 px-4 py-2 border border-white/20 text-white rounded-lg hover:bg-white/10 transition disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSpend}
+              disabled={isProcessing || !selectedMerchant || !spendAmount || parseFloat(spendAmount) <= 0}
+              className="flex-1 px-4 py-2 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-lg hover:shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
+            >
+              {isProcessing ? '⏳ Processing...' : '💳 Spend Now'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 }
