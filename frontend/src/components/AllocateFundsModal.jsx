@@ -7,6 +7,7 @@ import { db } from '../firebase/config';
 import { getPublicClient } from '@wagmi/core';
 import { config } from '../config/wagmiConfig';
 import CampaignABI from '../contracts/Campaign.json';
+import { addPolygonAmoyNetwork, updatePolygonAmoyRPC } from '../utils/addPolygonAmoyNetwork';
 
 export default function AllocateFundsModal({ campaign, beneficiaries, onClose, onSuccess }) {
   const [selectedBeneficiary, setSelectedBeneficiary] = useState('');
@@ -46,12 +47,19 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
         functionName: 'totalAllocated',
       });
       
-      // Check actual token balance of campaign contract
-      const { CONTRACTS } = await import('../services/polygonService');
+      // Get the token address from the campaign itself (campaigns may use different tokens)
+      const campaignTokenAddress = await publicClient.readContract({
+        address: campaign.blockchainAddress,
+        abi: CampaignABI.abi,
+        functionName: 'reliefToken',
+      });
+      console.log('🪙 Campaign token address:', campaignTokenAddress);
+      
+      // Check actual token balance of campaign contract using campaign's token
       const ReliefTokenABI = await import('../contracts/ReliefToken.json');
       
       const tokenBalance = await publicClient.readContract({
-        address: CONTRACTS.reliefToken,
+        address: campaignTokenAddress,
         abi: ReliefTokenABI.abi,
         functionName: 'balanceOf',
         args: [campaign.blockchainAddress],
@@ -116,13 +124,47 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
       } catch (chainError) {
         console.error('Failed to get chain ID:', chainError);
         setIsProcessing(false);
-        alert('❌ Network Error\n\nCannot connect to blockchain network.\n\nPlease check:\n1. MetaMask is unlocked\n2. You are connected to Polygon Amoy Testnet\n3. Your internet connection is stable\n\nThen try again.');
+        
+        // Try to fix the network configuration
+        const shouldFixNetwork = window.confirm(
+          '❌ Network Connection Error\n\n' +
+          'Cannot connect to Polygon Amoy network.\n\n' +
+          'This may be due to RPC issues.\n\n' +
+          'Click OK to automatically update the network configuration in MetaMask.'
+        );
+        
+        if (shouldFixNetwork) {
+          setTxStatus('Updating network configuration...');
+          const fixed = await updatePolygonAmoyRPC();
+          if (fixed) {
+            alert('✅ Network updated! Please try allocating funds again.');
+          }
+        }
+        
+        setTxStatus('');
         return;
       }
       
       if (chainId !== 80002) {
         setIsProcessing(false);
-        alert(`❌ Wrong Network!\n\nYou are connected to Chain ID: ${chainId}\n\nPlease switch to Polygon Amoy Testnet (Chain ID: 80002) in MetaMask.\n\n1. Open MetaMask\n2. Click network dropdown\n3. Select "Polygon Amoy Testnet"\n4. Try again`);
+        
+        // Try to switch/add network automatically
+        const shouldSwitch = window.confirm(
+          `❌ Wrong Network!\n\n` +
+          `Current Chain ID: ${chainId}\n` +
+          `Required: Polygon Amoy (80002)\n\n` +
+          `Click OK to automatically switch to Polygon Amoy Testnet.`
+        );
+        
+        if (shouldSwitch) {
+          setTxStatus('Switching network...');
+          const switched = await addPolygonAmoyNetwork();
+          if (switched) {
+            alert('✅ Switched to Polygon Amoy! Please try allocating funds again.');
+          }
+          setTxStatus('');
+        }
+        
         return;
       }
       console.log('✅ Connected to Polygon Amoy testnet');
@@ -186,8 +228,19 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
         return;
       }
 
+      // IMPORTANT: For beneficiaries, the wallet address IS the document ID
+      // The id field contains the wallet address (lowercase)
+      const beneficiaryWalletAddress = beneficiary.walletAddress || beneficiary.id;
+      
+      if (!beneficiaryWalletAddress || !beneficiaryWalletAddress.startsWith('0x')) {
+        alert('❌ Invalid beneficiary wallet address');
+        setIsProcessing(false);
+        return;
+      }
+
       console.log('🎯 Allocating funds:', {
-        beneficiary: beneficiary.walletAddress,
+        beneficiaryWallet: beneficiaryWalletAddress,
+        beneficiaryId: beneficiary.id,
         amount: amount,
         amountInWei: amountInWei.toString(),
         campaign: campaign.blockchainAddress,
@@ -220,7 +273,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
             address: campaign.blockchainAddress,
             abi: CampaignABI.abi,
             functionName: 'allocateFunds',
-            args: [beneficiary.walletAddress, amountInWei],
+            args: [beneficiaryWalletAddress, amountInWei],
             account: walletClient.account.address,
           });
           console.log('✅ Gas estimation successful:', gasEstimate);
@@ -257,7 +310,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
           console.log('📤 Sending transaction to blockchain...');
           console.log('Contract:', campaign.blockchainAddress);
           console.log('Function: allocateFunds');
-        console.log('Args:', [beneficiary.walletAddress, amountInWei.toString()]);
+        console.log('Args:', [beneficiaryWalletAddress, amountInWei.toString()]);
         console.log('From:', address);
         console.log('Chain ID:', chainId);
         
@@ -266,7 +319,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
           address: campaign.blockchainAddress,
           abi: CampaignABI.abi,
           functionName: 'allocateFunds',
-          args: [beneficiary.walletAddress, amountInWei],
+          args: [beneficiaryWalletAddress, amountInWei],
           account: address,
           chain: {
             id: 80002,
@@ -360,7 +413,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
             if (log.topics.length >= 2) {
               // The beneficiary address is in the first indexed parameter (topic[1])
               const beneficiaryFromLog = `0x${log.topics[1].slice(26)}`;
-              if (beneficiaryFromLog.toLowerCase() === beneficiary.walletAddress.toLowerCase()) {
+              if (beneficiaryFromLog.toLowerCase() === beneficiaryWalletAddress.toLowerCase()) {
                 // Wallet address is typically in the log data or topic[2]
                 if (log.topics.length >= 3) {
                   walletAddress = `0x${log.topics[2].slice(26)}`;
@@ -382,7 +435,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
             address: campaign.blockchainAddress,
             abi: CampaignABI.abi,
             functionName: 'getBeneficiaryWallet',
-            args: [beneficiary.walletAddress],
+            args: [beneficiaryWalletAddress],
           });
           console.log('✅ Got wallet address from blockchain:', walletAddress);
         } catch (queryErr) {
@@ -399,7 +452,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
         if (db) {
           console.log('💾 Saving to Firebase:', {
             beneficiaryId: selectedBeneficiary,
-            beneficiaryWallet: beneficiary.walletAddress,
+            beneficiaryWallet: beneficiaryWalletAddress,
             amount: parseFloat(amount),
             contractWalletAddress: walletAddress
           });
@@ -409,7 +462,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
             campaignTitle: campaign.title,
             beneficiaryId: selectedBeneficiary,
             beneficiaryName: beneficiary.name || beneficiary.email,
-            beneficiaryWallet: beneficiary.walletAddress,
+            beneficiaryWallet: beneficiaryWalletAddress,
             amount: parseFloat(amount),
             contractWalletAddress: walletAddress,
             txHash: txHash,
@@ -549,11 +602,14 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
             className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
           >
             <option value="">Choose a beneficiary...</option>
-            {beneficiaries.map(beneficiary => (
-              <option key={beneficiary.id} value={beneficiary.id}>
-                {beneficiary.name || beneficiary.email} - {beneficiary.walletAddress?.slice(0, 6)}...{beneficiary.walletAddress?.slice(-4)}
-              </option>
-            ))}
+            {beneficiaries.map(beneficiary => {
+              const walletAddr = beneficiary.walletAddress || beneficiary.id;
+              return (
+                <option key={beneficiary.id} value={beneficiary.id}>
+                  {beneficiary.name || beneficiary.email} - {walletAddr?.slice(0, 6)}...{walletAddr?.slice(-4)}
+                </option>
+              );
+            })}
           </select>
         </div>
 
