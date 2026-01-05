@@ -172,10 +172,16 @@ contract BeneficiaryWallet is ReentrancyGuard, Pausable {
     ) external nonReentrant onlyBeneficiary whenNotPaused {
         require(merchant != address(0), "BeneficiaryWallet: Invalid merchant");
         require(amount > 0, "BeneficiaryWallet: Amount must be greater than 0");
+        
+        // Check if merchant is globally verified by admin OR approved by organizer for this category
+        bool isGloballyVerified = ICampaignFactory(factory).isVerifiedMerchant(merchant);
+        bool isLocallyApproved = approvedMerchants[merchant][category];
+        
         require(
-            approvedMerchants[merchant][category],
-            "BeneficiaryWallet: Merchant not approved for this category"
+            isGloballyVerified || isLocallyApproved,
+            "BeneficiaryWallet: Merchant not verified"
         );
+        
         require(
             amount <= categoryLimits[category],
             "BeneficiaryWallet: Amount exceeds category limit"

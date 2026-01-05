@@ -215,6 +215,9 @@ contract CampaignFactory is Ownable, ReentrancyGuard {
     function getAllVerifiedMerchants() external view returns (address[] memory) {
         return merchants;
     }
+    
+    /**
+     * @notice Check if organizer is approved
      * @param organizer Address to check
      * @return True if approved
      */
