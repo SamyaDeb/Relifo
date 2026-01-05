@@ -638,12 +638,38 @@ function DonateModal({ campaign, onClose }) {
   const [balance, setBalance] = useState('0');
   const [txStatus, setTxStatus] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [campaignTokenAddress, setCampaignTokenAddress] = useState(null);
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
 
   useEffect(() => {
+    loadCampaignToken();
     loadBalance();
-  }, [address]);
+  }, [address, campaign]);
+
+  // Get the token address from the campaign contract
+  const loadCampaignToken = async () => {
+    try {
+      if (!campaign.blockchainAddress) return;
+      
+      const { getPublicClient } = await import('@wagmi/core');
+      const { config } = await import('../../config/wagmiConfig');
+      const CampaignABI = (await import('../../contracts/Campaign.json')).default.abi;
+      
+      const client = getPublicClient(config, { chainId: 80002 });
+      const tokenAddr = await client.readContract({
+        address: campaign.blockchainAddress,
+        abi: CampaignABI,
+        functionName: 'reliefToken',
+      });
+      console.log('🪙 Campaign uses token:', tokenAddr);
+      setCampaignTokenAddress(tokenAddr);
+    } catch (error) {
+      console.error('Error loading campaign token:', error);
+      // Fallback to global token
+      setCampaignTokenAddress(polygonService.CONTRACTS.reliefToken);
+    }
+  };
 
   const loadBalance = async () => {
     try {
@@ -651,9 +677,12 @@ function DonateModal({ campaign, onClose }) {
       const { getPublicClient } = await import('@wagmi/core');
       const { config } = await import('../../config/wagmiConfig');
       
+      // Use campaign's token address or fallback to global
+      const tokenToCheck = campaignTokenAddress || polygonService.CONTRACTS.reliefToken;
+      
       const client = getPublicClient(config, { chainId: 80002 });
       const bal = await client.readContract({
-        address: polygonService.CONTRACTS.reliefToken,
+        address: tokenToCheck,
         abi: (await import('../../contracts/ReliefToken.json')).default.abi,
         functionName: 'balanceOf',
         args: [address],
@@ -663,6 +692,13 @@ function DonateModal({ campaign, onClose }) {
       console.error('Error loading balance:', error);
     }
   };
+
+  // Reload balance when campaign token is loaded
+  useEffect(() => {
+    if (campaignTokenAddress && address) {
+      loadBalance();
+    }
+  }, [campaignTokenAddress, address]);
 
   const handleDonate = async () => {
     try {
@@ -681,17 +717,25 @@ function DonateModal({ campaign, onClose }) {
         return;
       }
 
+      if (!campaignTokenAddress) {
+        alert('Loading campaign token... Please try again.');
+        return;
+      }
+
       setIsProcessing(true);
       setTxStatus('Preparing transaction...');
 
       const amountInWei = parseEther(amount);
+      
+      // Use the campaign's token address
+      const tokenToUse = campaignTokenAddress;
       
       console.log('=== Donation Details ===');
       console.log('Donor address:', address);
       console.log('Campaign blockchain address:', campaign.blockchainAddress);
       console.log('Amount:', amount, 'RELIEF');
       console.log('Amount in Wei:', amountInWei.toString());
-      console.log('RELIEF Token address:', polygonService.CONTRACTS.reliefToken);
+      console.log('🪙 Campaign Token address:', tokenToUse);
       console.log('Donor balance:', balance, 'RELIEF');
 
       // Check balance
@@ -706,10 +750,10 @@ function DonateModal({ campaign, onClose }) {
       const { config } = await import('../../config/wagmiConfig');
       const client = getPublicClient(config, { chainId: 80002 });
 
-      // Check allowance
+      // Check allowance using campaign's token
       setTxStatus('Checking token allowance...');
       const currentAllowance = await client.readContract({
-        address: polygonService.CONTRACTS.reliefToken,
+        address: tokenToUse,
         abi: ReliefTokenABI,
         functionName: 'allowance',
         args: [address, campaign.blockchainAddress],
@@ -722,7 +766,7 @@ function DonateModal({ campaign, onClose }) {
         // Try to estimate gas first to get better error messages
         try {
           const gasEstimate = await client.estimateContractGas({
-            address: polygonService.CONTRACTS.reliefToken,
+            address: tokenToUse,
             abi: ReliefTokenABI,
             functionName: 'approve',
             args: [campaign.blockchainAddress, amountInWei],
@@ -743,7 +787,7 @@ function DonateModal({ campaign, onClose }) {
         
         setTxStatus('Please approve RELIEF tokens in MetaMask...');
         const approveTxHash = await walletClient.writeContract({
-          address: polygonService.CONTRACTS.reliefToken,
+          address: tokenToUse,
           abi: ReliefTokenABI,
           functionName: 'approve',
           args: [campaign.blockchainAddress, amountInWei],

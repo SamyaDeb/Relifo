@@ -5,7 +5,8 @@ export const ROLES = {
   ADMIN: 'admin',
   ORGANIZER: 'organizer',
   BENEFICIARY: 'beneficiary',
-  DONOR: 'donor'
+  DONOR: 'donor',
+  MERCHANT: 'merchant'
 };
 
 export const USER_ROLES = ROLES; // Alias for backwards compatibility
@@ -31,4 +32,15 @@ export const DISASTER_TYPES = {
   FIRE: 'fire',
   LANDSLIDE: 'landslide',
   OTHER: 'other'
+};
+
+export const MERCHANT_CATEGORIES = {
+  FOOD: 'Food',
+  MEDICINE: 'Medicine',
+  SHELTER: 'Shelter Materials',
+  CLOTHING: 'Clothing',
+  EDUCATION: 'Education Supplies',
+  WATER: 'Clean Water',
+  HYGIENE: 'Hygiene Products',
+  OTHER: 'Other Essentials'
 };

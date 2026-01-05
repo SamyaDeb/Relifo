@@ -4,7 +4,7 @@ import { useAccount } from 'wagmi';
 import { db, storage } from '../firebase/config';
 import { doc, setDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { ROLES, USER_STATUS } from '../firebase/constants';
+import { ROLES, USER_STATUS, MERCHANT_CATEGORIES } from '../firebase/constants';
 
 export default function Register() {
   const navigate = useNavigate();
@@ -16,9 +16,20 @@ export default function Register() {
     email: '',
     organization: '',
     description: '',
-    campaignId: ''
+    campaignId: '',
+    // Merchant specific fields
+    businessName: '',
+    businessType: '',
+    businessAddress: '',
+    phone: '',
+    categories: []
   });
   const [documentFile, setDocumentFile] = useState(null);
+  const [merchantDocuments, setMerchantDocuments] = useState({
+    businessLicense: null,
+    taxId: null,
+    ownershipProof: null
+  });
   const [uploadProgress, setUploadProgress] = useState(0);
   const [campaigns, setCampaigns] = useState([]);
 
@@ -55,6 +66,15 @@ export default function Register() {
       autoApprove: false,
       approvedBy: 'organizer',
       color: 'from-purple-500 to-pink-600'
+    },
+    {
+      id: ROLES.MERCHANT,
+      name: 'Merchant',
+      icon: '🏪',
+      description: 'Provide essential goods and services to beneficiaries',
+      autoApprove: false,
+      approvedBy: 'admin',
+      color: 'from-orange-500 to-red-600'
     }
   ];
 
@@ -139,6 +159,33 @@ export default function Register() {
         roleProfile.campaignId = formData.campaignId;
         roleProfile.allocatedFunds = 0;
         roleProfile.spentFunds = 0;
+      } else if (selectedRole === ROLES.MERCHANT) {
+        // Upload merchant documents
+        const merchantDocUrls = {};
+        if (storage) {
+          for (const [docType, file] of Object.entries(merchantDocuments)) {
+            if (file) {
+              try {
+                const fileRef = ref(storage, `merchant-documents/${address}/${docType}_${file.name}`);
+                await uploadBytes(fileRef, file);
+                merchantDocUrls[docType] = await getDownloadURL(fileRef);
+              } catch (uploadError) {
+                console.error(`${docType} upload failed:`, uploadError);
+              }
+            }
+          }
+        }
+
+        roleProfile.businessName = formData.businessName;
+        roleProfile.businessType = formData.businessType;
+        roleProfile.businessAddress = formData.businessAddress;
+        roleProfile.phone = formData.phone;
+        roleProfile.categories = formData.categories;
+        roleProfile.documents = merchantDocUrls;
+        roleProfile.balance = 0;
+        roleProfile.totalEarnings = 0;
+        roleProfile.transactionCount = 0;
+        roleProfile.verified = false;
       }
 
       // Save both documents
@@ -161,11 +208,21 @@ export default function Register() {
       if (selectedRole === ROLES.BENEFICIARY) {
         usersDocument.campaignId = formData.campaignId;
       }
+
+      // Include merchant business info
+      if (selectedRole === ROLES.MERCHANT) {
+        usersDocument.businessName = formData.businessName;
+        usersDocument.businessType = formData.businessType;
+        usersDocument.categories = formData.categories;
+      }
       
+      // Save to Firebase
       await Promise.all([
         setDoc(doc(db, 'users', address.toLowerCase()), usersDocument),
         setDoc(doc(db, profileCollection, address.toLowerCase()), roleProfile)
       ]);
+
+      console.log('✅ Registration saved to database');
 
       // Navigate immediately
       if (status === USER_STATUS.APPROVED) {
@@ -299,8 +356,171 @@ export default function Register() {
                 />
               </div>
 
+              {/* Merchant-specific fields */}
+              {selectedRole === ROLES.MERCHANT && (
+                <>
+                  {/* Business Name */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Business Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.businessName}
+                      onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
+                      placeholder="Your business name"
+                    />
+                  </div>
+
+                  {/* Business Type */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Business Type *
+                    </label>
+                    <select
+                      required
+                      value={formData.businessType}
+                      onChange={(e) => setFormData({ ...formData, businessType: e.target.value })}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
+                    >
+                      <option value="">-- Select business type --</option>
+                      <option value="retail">Retail Store</option>
+                      <option value="wholesale">Wholesale</option>
+                      <option value="restaurant">Restaurant/Food Service</option>
+                      <option value="pharmacy">Pharmacy</option>
+                      <option value="grocery">Grocery Store</option>
+                      <option value="hardware">Hardware Store</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+
+                  {/* Business Categories */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      What do you provide? (Select all that apply) *
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      {Object.values(MERCHANT_CATEGORIES).map(category => (
+                        <label
+                          key={category}
+                          className={`flex items-center gap-2 p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                            formData.categories.includes(category)
+                              ? 'border-orange-500 bg-orange-50'
+                              : 'border-gray-300 hover:border-orange-300'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={formData.categories.includes(category)}
+                            onChange={() => {
+                              setFormData(prev => ({
+                                ...prev,
+                                categories: prev.categories.includes(category)
+                                  ? prev.categories.filter(c => c !== category)
+                                  : [...prev.categories, category]
+                              }));
+                            }}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-sm font-medium">{category}</span>
+                        </label>
+                      ))}
+                    </div>
+                    {formData.categories.length === 0 && (
+                      <p className="text-sm text-red-500 mt-1">Please select at least one category</p>
+                    )}
+                  </div>
+
+                  {/* Business Address */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Business Address *
+                    </label>
+                    <textarea
+                      required
+                      value={formData.businessAddress}
+                      onChange={(e) => setFormData({ ...formData, businessAddress: e.target.value })}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
+                      rows="2"
+                      placeholder="Full business address"
+                    />
+                  </div>
+
+                  {/* Phone */}
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Phone Number *
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      value={formData.phone}
+                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
+                      placeholder="+1234567890"
+                    />
+                  </div>
+
+                  {/* Merchant Documents */}
+                  <div className="space-y-4">
+                    <h3 className="font-semibold text-gray-900">Business Documents (Optional)</h3>
+                    
+                    {/* Business License */}
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Business License
+                      </label>
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={(e) => setMerchantDocuments({ ...merchantDocuments, businessLicense: e.target.files[0] })}
+                        className="w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100"
+                      />
+                      {merchantDocuments.businessLicense && (
+                        <p className="text-sm text-green-600 mt-1">✓ {merchantDocuments.businessLicense.name}</p>
+                      )}
+                    </div>
+
+                    {/* Tax ID */}
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Tax ID / EIN Document
+                      </label>
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={(e) => setMerchantDocuments({ ...merchantDocuments, taxId: e.target.files[0] })}
+                        className="w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100"
+                      />
+                      {merchantDocuments.taxId && (
+                        <p className="text-sm text-green-600 mt-1">✓ {merchantDocuments.taxId.name}</p>
+                      )}
+                    </div>
+
+                    {/* Ownership Proof */}
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-2">
+                        Proof of Ownership
+                      </label>
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={(e) => setMerchantDocuments({ ...merchantDocuments, ownershipProof: e.target.files[0] })}
+                        className="w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100"
+                      />
+                      {merchantDocuments.ownershipProof && (
+                        <p className="text-sm text-green-600 mt-1">✓ {merchantDocuments.ownershipProof.name}</p>
+                      )}
+                      <p className="text-sm text-gray-500 mt-1">Lease agreement, property deed, or utility bill</p>
+                    </div>
+                  </div>
+                </>
+              )}
+
               {/* Organization (for Organizer/Beneficiary) */}
-              {!selectedRoleData.autoApprove && (
+              {!selectedRoleData.autoApprove && selectedRole !== ROLES.MERCHANT && (
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     Organization {selectedRole === ROLES.ORGANIZER ? '*' : '(Optional)'}
@@ -344,7 +564,7 @@ export default function Register() {
               )}
 
               {/* Description (for Organizer/Beneficiary) */}
-              {!selectedRoleData.autoApprove && (
+              {!selectedRoleData.autoApprove && selectedRole !== ROLES.MERCHANT && (
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     {selectedRole === ROLES.BENEFICIARY ? 'Why do you need relief funds?' : 'Why do you need this role?'} *
@@ -361,7 +581,7 @@ export default function Register() {
               )}
 
               {/* Document Upload (for Organizer/Beneficiary) */}
-              {!selectedRoleData.autoApprove && (
+              {!selectedRoleData.autoApprove && selectedRole !== ROLES.MERCHANT && (
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     Verification Document (PDF) - Optional
@@ -398,6 +618,8 @@ export default function Register() {
                       <p className="text-sm text-yellow-700">
                         {selectedRole === ROLES.BENEFICIARY 
                           ? 'Your application will be reviewed by the campaign organizer. You\'ll be notified once approved.'
+                          : selectedRole === ROLES.MERCHANT
+                          ? 'Your business will be verified by our admin team. Ensure all documents are valid and up-to-date.'
                           : 'Your application will be reviewed by our admin team. You\'ll be notified once approved.'}
                       </p>
                     </div>

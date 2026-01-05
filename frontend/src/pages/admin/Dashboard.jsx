@@ -9,19 +9,25 @@ import { getPublicClient } from '@wagmi/core';
 import { config } from '../../config/wagmiConfig';
 import CampaignFactoryABI from '../../contracts/CampaignFactory.json';
 import deployment from '../../contracts/addresses.json';
+import { encodeFunctionData } from 'viem';
 
 export default function AdminDashboard() {
   const [users, setUsers] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
+  const [merchants, setMerchants] = useState([]);
   const [stats, setStats] = useState({
     totalUsers: 0,
     pendingApprovals: 0,
     activeCampaigns: 0,
     totalDonations: 0,
     organizers: 0,
-    beneficiaries: 0
+    beneficiaries: 0,
+    pendingMerchants: 0,
+    verifiedMerchants: 0
   });
   const [loading, setLoading] = useState(true);
+  const [approving, setApproving] = useState(null);
+  const [revoking, setRevoking] = useState(null);
   const { address } = useAccount();
   const { disconnect } = useDisconnect();
   const { data: walletClient } = useWalletClient();
@@ -60,7 +66,7 @@ export default function AdminDashboard() {
         const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setUsers(usersData);
 
-        const pending = usersData.filter(u => u.status === USER_STATUS.PENDING).length;
+        const pending = usersData.filter(u => u.status === USER_STATUS.PENDING && u.role !== ROLES.BENEFICIARY).length;
         const organizers = usersData.filter(u => u.role === ROLES.ORGANIZER && u.status === USER_STATUS.APPROVED).length;
         const beneficiaries = usersData.filter(u => u.role === ROLES.BENEFICIARY && u.status === USER_STATUS.APPROVED).length;
 
@@ -89,11 +95,51 @@ export default function AdminDashboard() {
         }));
       });
 
+      // Realtime listener for merchants
+      const merchantsRef = collection(db, 'merchant_profile');
+      const unsubscribeMerchants = onSnapshot(merchantsRef, async (snapshot) => {
+        const merchantsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        // Check blockchain verification status for each merchant
+        const publicClient = getPublicClient(config, { chainId: 80002 });
+        const merchantsWithStatus = await Promise.all(
+          merchantsData.map(async (merchant) => {
+            if (!merchant.walletAddress) {
+              return { ...merchant, blockchainVerified: false };
+            }
+            try {
+              const isVerified = await publicClient.readContract({
+                address: CONTRACTS.campaignFactory,
+                abi: CampaignFactoryABI.abi,
+                functionName: 'isVerifiedMerchant',
+                args: [merchant.walletAddress]
+              });
+              return { ...merchant, blockchainVerified: isVerified };
+            } catch (error) {
+              console.error('Error checking merchant verification:', error);
+              return { ...merchant, blockchainVerified: false };
+            }
+          })
+        );
+        
+        setMerchants(merchantsWithStatus);
+        
+        const pending = merchantsWithStatus.filter(m => !m.blockchainVerified).length;
+        const verified = merchantsWithStatus.filter(m => m.blockchainVerified).length;
+        
+        setStats(prev => ({
+          ...prev,
+          pendingMerchants: pending,
+          verifiedMerchants: verified
+        }));
+      });
+
       setLoading(false);
 
       return () => {
         unsubscribeUsers();
         unsubscribeCampaigns();
+        unsubscribeMerchants();
       };
     } catch (error) {
       console.error('Error loading data:', error);
@@ -115,6 +161,215 @@ export default function AdminDashboard() {
       const user = users.find(u => u.id === userId);
       console.log('Approving user:', user);
       console.log('Admin wallet connected:', address);
+      
+      // If user is a merchant, use merchant verification flow
+      if (user?.role === ROLES.MERCHANT) {
+        if (!user?.walletAddress) {
+          alert('❌ Merchant wallet address not found');
+          return;
+        }
+        if (!walletClient) {
+          alert('❌ Please connect your admin wallet first');
+          return;
+        }
+        
+        try {
+          console.log('🏪 Verifying merchant on blockchain:', user.walletAddress);
+          console.log('📝 Contract:', CONTRACTS.campaignFactory);
+          console.log('👤 Admin wallet:', address);
+          
+          // Check if connected wallet is the owner
+          const publicClient = getPublicClient(config, { chainId: 80002 });
+          
+          // First, check chain ID
+          const chainId = await publicClient.getChainId();
+          console.log('🔗 Current chain ID:', chainId);
+          if (chainId !== 80002) {
+            alert('❌ Please switch to Polygon Amoy network (Chain ID: 80002)');
+            return;
+          }
+          
+          // Check if merchant is already verified
+          console.log('📋 Checking if merchant already verified...');
+          const isAlreadyVerified = await publicClient.readContract({
+            address: CONTRACTS.campaignFactory,
+            abi: CampaignFactoryABI.abi,
+            functionName: 'isVerifiedMerchant',
+            args: [user.walletAddress]
+          });
+          
+          if (isAlreadyVerified) {
+            console.log('✅ Merchant already verified on blockchain');
+            // Just update Firebase
+            await updateDoc(doc(db, 'users', userId), {
+              status: USER_STATUS.APPROVED
+            });
+            alert(`✅ Merchant already verified on blockchain!\n\nUpdated Firebase status.`);
+            loadData();
+            return;
+          }
+          
+          console.log('⏳ Simulating transaction...');
+          setApproving(userId);
+          
+          // Step 1: Simulate the transaction (more reliable than gas estimation)
+          let simulationResult;
+          try {
+            simulationResult = await publicClient.simulateContract({
+              address: CONTRACTS.campaignFactory,
+              abi: CampaignFactoryABI.abi,
+              functionName: 'verifyMerchant',
+              args: [user.walletAddress],
+              account: address
+            });
+            console.log('✅ Simulation successful:', simulationResult);
+          } catch (simError) {
+            console.error('❌ Transaction simulation failed:', simError);
+            
+            // Check owner
+            try {
+              const owner = await publicClient.readContract({
+                address: CONTRACTS.campaignFactory,
+                abi: CampaignFactoryABI.abi,
+                functionName: 'owner',
+                args: []
+              });
+              console.log('📋 Contract owner:', owner);
+              console.log('📋 Your address:', address);
+              if (owner.toLowerCase() !== address.toLowerCase()) {
+                alert(`❌ You are not the contract owner!\n\nContract owner: ${owner}\nYour wallet: ${address}\n\nPlease connect with the admin wallet.`);
+                setApproving(null);
+                return;
+              }
+            } catch (e) {
+              console.error('Error checking owner:', e);
+            }
+            
+            alert('❌ Transaction would fail. Reason: ' + (simError.shortMessage || simError.message));
+            setApproving(null);
+            return;
+          }
+          
+          // Step 2: Estimate gas with buffer
+          console.log('⏳ Estimating gas...');
+          const gasEstimate = await publicClient.estimateContractGas({
+            address: CONTRACTS.campaignFactory,
+            abi: CampaignFactoryABI.abi,
+            functionName: 'verifyMerchant',
+            args: [user.walletAddress],
+            account: address
+          });
+          
+          // Add 20% buffer to gas estimate
+          const gasLimit = BigInt(Math.floor(Number(gasEstimate) * 1.2));
+          console.log('⛽ Gas estimate:', gasEstimate.toString());
+          console.log('⛽ Gas limit (with buffer):', gasLimit.toString());
+          
+          console.log('⏳ Sending transaction...');
+          
+          let tx;
+          try {
+            // Try with wagmi first (with gas limit)
+            tx = await walletClient.writeContract({
+              address: CONTRACTS.campaignFactory,
+              abi: CampaignFactoryABI.abi,
+              functionName: 'verifyMerchant',
+              args: [user.walletAddress],
+              account: address,
+              gas: gasLimit
+            });
+          } catch (wagmiError) {
+            console.log('⚠️ Wagmi failed, trying MetaMask directly...', wagmiError);
+            
+            // Fallback to MetaMask direct call
+            if (window.ethereum) {
+              try {
+                // Check/switch network first
+                const currentChainId = await window.ethereum.request({ method: 'eth_chainId' });
+                const targetChainId = '0x13882'; // 80002 in hex
+                
+                if (currentChainId !== targetChainId) {
+                  console.log('🔄 Switching to Polygon Amoy...');
+                  try {
+                    await window.ethereum.request({
+                      method: 'wallet_switchEthereumChain',
+                      params: [{ chainId: targetChainId }],
+                    });
+                  } catch (switchError) {
+                    // Network not added, try adding it
+                    if (switchError.code === 4902) {
+                      await window.ethereum.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [{
+                          chainId: targetChainId,
+                          chainName: 'Polygon Amoy',
+                          nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
+                          rpcUrls: ['https://rpc-amoy.polygon.technology'],
+                          blockExplorerUrls: ['https://amoy.polygonscan.com']
+                        }]
+                      });
+                    } else {
+                      throw switchError;
+                    }
+                  }
+                }
+                
+                // Encode function data
+                const data = encodeFunctionData({
+                  abi: CampaignFactoryABI.abi,
+                  functionName: 'verifyMerchant',
+                  args: [user.walletAddress]
+                });
+                
+                console.log('📝 Encoded data:', data);
+                
+                // Send transaction via MetaMask with proper gas limit
+                const txHash = await window.ethereum.request({
+                  method: 'eth_sendTransaction',
+                  params: [{
+                    from: address,
+                    to: CONTRACTS.campaignFactory,
+                    data: data,
+                    gas: '0x' + gasLimit.toString(16), // Use calculated gas limit
+                  }],
+                });
+                
+                tx = txHash;
+                console.log('✅ MetaMask transaction sent:', tx);
+              } catch (mmError) {
+                console.error('❌ MetaMask direct call also failed:', mmError);
+                throw mmError;
+              }
+            } else {
+              throw wagmiError;
+            }
+          }
+          
+          console.log('✅ Transaction hash:', tx);
+          console.log('⌛ Waiting for confirmation...');
+          
+          // Wait for transaction confirmation
+          const receipt = await publicClient.waitForTransactionReceipt({ hash: tx });
+          
+          console.log('✅ Transaction confirmed!', receipt);
+          console.log('🔗 PolygonScan:', `https://amoy.polygonscan.com/tx/${tx}`);
+          
+          // Update Firebase status
+          await updateDoc(doc(db, 'users', userId), {
+            status: USER_STATUS.APPROVED
+          });
+          
+          alert(`✅ Merchant verified on blockchain!\n\nMerchant: ${user.name}\nWallet: ${user.walletAddress}\n\n🔗 View on PolygonScan:\nhttps://amoy.polygonscan.com/tx/${tx}`);
+          loadData(); // Reload to update merchant verification status
+        } catch (error) {
+          console.error('Error verifying merchant:', error);
+          const errorMsg = parseContractError(error);
+          alert(`❌ Failed to verify merchant on blockchain: ${errorMsg}\n\nPlease make sure:\n1. You're connected with the admin wallet\n2. You have enough POL for gas\n3. You're on Polygon Amoy network`);
+        } finally {
+          setApproving(null);
+        }
+        return;
+      }
       
       // If user is an organizer, check blockchain status FIRST before updating Firebase
       if (user?.role === ROLES.ORGANIZER && user?.walletAddress && walletClient) {
@@ -240,6 +495,82 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleApproveMerchant = async (merchant) => {
+    if (!merchant || !merchant.walletAddress) {
+      alert('❌ Merchant wallet address not found');
+      return;
+    }
+
+    try {
+      console.log('🏪 Approving merchant on blockchain:', merchant.walletAddress);
+      
+      if (!walletClient) {
+        alert('❌ Please connect your admin wallet first');
+        return;
+      }
+
+      setApproving(merchant.id);
+
+      // Verify merchant on blockchain
+      const tx = await walletClient.writeContract({
+        address: CONTRACTS.campaignFactory,
+        abi: CampaignFactoryABI.abi,
+        functionName: 'verifyMerchant',
+        args: [merchant.walletAddress],
+        account: address
+      });
+
+      console.log('✅ Transaction sent:', tx);
+      alert(`✅ Merchant verified on blockchain!\n\nMerchant: ${merchant.businessName}\nWallet: ${merchant.walletAddress}\n\nTx: ${tx.slice(0, 10)}...`);
+      
+      // Reload merchants to update status
+      loadData();
+    } catch (error) {
+      console.error('Error approving merchant:', error);
+      const errorMsg = parseContractError(error);
+      alert(`❌ Failed to verify merchant on blockchain: ${errorMsg}\n\nPlease make sure:\n1. You're connected with the admin wallet\n2. You have enough POL for gas\n3. You're on Polygon Amoy network`);
+    } finally {
+      setApproving(null);
+    }
+  };
+
+  const handleRevokeMerchant = async (merchant) => {
+    if (!merchant || !merchant.walletAddress) {
+      alert('❌ Merchant wallet address not found');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to revoke merchant verification for ${merchant.businessName}?`)) {
+      return;
+    }
+
+    try {
+      if (!walletClient) {
+        alert('❌ Please connect your admin wallet first');
+        return;
+      }
+
+      setRevoking(merchant.id);
+
+      const tx = await walletClient.writeContract({
+        address: CONTRACTS.campaignFactory,
+        abi: CampaignFactoryABI.abi,
+        functionName: 'revokeMerchant',
+        args: [merchant.walletAddress],
+        account: address
+      });
+
+      console.log('✅ Merchant revoked:', tx);
+      alert(`✅ Merchant verification revoked!\n\nTx: ${tx.slice(0, 10)}...`);
+      loadData();
+    } catch (error) {
+      console.error('Error revoking merchant:', error);
+      alert('Failed to revoke merchant verification');
+    } finally {
+      setRevoking(null);
+    }
+  };
+
   const handlePauseCampaign = async (campaignId) => {
     try {
       await updateDoc(doc(db, 'campaigns', campaignId), {
@@ -272,8 +603,10 @@ export default function AdminDashboard() {
     );
   }
 
-  const pendingUsers = users.filter(u => u.status === USER_STATUS.PENDING);
+  const pendingUsers = users.filter(u => u.status === USER_STATUS.PENDING && u.role !== ROLES.BENEFICIARY);
   const approvedUsers = users.filter(u => u.status === USER_STATUS.APPROVED);
+  const pendingMerchants = merchants.filter(m => !m.blockchainVerified);
+  const verifiedMerchants = merchants.filter(m => m.blockchainVerified);
 
   return (
     <div className="min-h-screen h-screen bg-black relative overflow-hidden">
@@ -381,9 +714,9 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Pending User Approvals */}
+        {/* Pending Organizer & Merchant Approvals */}
         <div className="glass-card border border-white/20 rounded-3xl p-5 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all mb-4 flex-shrink-0 overflow-hidden h-[200px] flex flex-col">
-          <h2 className="text-xl font-semibold text-white mb-4 flex-shrink-0">Pending User Approvals</h2>
+          <h2 className="text-xl font-semibold text-white mb-4 flex-shrink-0">Pending Organizer & Merchant Approvals</h2>
           <div className="overflow-y-auto custom-scrollbar flex-1">
             {pendingUsers.length === 0 ? (
               <p className="text-white/40 text-center py-8">No pending approvals</p>
@@ -397,8 +730,18 @@ export default function AdminDashboard() {
                         <p className="text-white/60 text-xs">Role: {user.role}</p>
                         {user.organization && <p className="text-white/60 text-xs">Org: {user.organization}</p>}
                         {user.walletAddress && <p className="text-green-400 text-xs font-mono">{user.walletAddress.slice(0, 6)}...{user.walletAddress.slice(-4)}</p>}
+                        {user.description && <p className="text-white/50 text-xs italic mt-1">{user.description.substring(0, 80)}{user.description.length > 80 ? '...' : ''}</p>}
                       </div>
                       <div className="flex gap-2">
+                        {user.documentUrl && (
+                          <button
+                            onClick={() => window.open(user.documentUrl, '_blank')}
+                            className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-3 py-1 rounded-xl text-xs font-semibold hover:shadow-lg hover:shadow-blue-500/50 transition-all"
+                            title="View submitted document"
+                          >
+                            📄 View Doc
+                          </button>
+                        )}
                         <button
                           onClick={() => handleApproveUser(user.id)}
                           className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-3 py-1 rounded-xl text-xs font-semibold hover:shadow-lg hover:shadow-green-500/50 transition-all"
