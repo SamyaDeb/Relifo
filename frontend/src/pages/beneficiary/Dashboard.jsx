@@ -21,6 +21,7 @@ export default function BeneficiaryDashboard() {
   const [loading, setLoading] = useState(true);
   const [campaign, setCampaign] = useState(null);
   const [userData, setUserData] = useState(null);
+  const [campaignTokenAddress, setCampaignTokenAddress] = useState(null); // Token address from campaign
   const { address } = useAccount();
   const { disconnect } = useDisconnect();
   const navigate = useNavigate();
@@ -32,7 +33,7 @@ export default function BeneficiaryDashboard() {
       console.log('Campaign Address:', campaignAddress);
       console.log('Beneficiary Address:', address);
       
-      const publicClient = getPublicClient(config, { chainId: 80002 });
+      const publicClient = getPublicClient(config);
       
       // Get beneficiary wallet address from campaign contract
       const walletAddress = await publicClient.readContract({
@@ -47,9 +48,18 @@ export default function BeneficiaryDashboard() {
       if (walletAddress && walletAddress !== '0x0000000000000000000000000000000000000000') {
         setContractWalletAddress(walletAddress);
         
-        // Get wallet balance
+        // Get the token address from the campaign (important: campaign may use different token)
+        const tokenAddr = await publicClient.readContract({
+          address: campaignAddress,
+          abi: CampaignABI.abi,
+          functionName: 'reliefToken',
+        });
+        console.log('🪙 Campaign token address:', tokenAddr);
+        setCampaignTokenAddress(tokenAddr); // Store token address in state
+        
+        // Get wallet balance using the campaign's token (NOT the global CONTRACTS.reliefToken)
         const balance = await publicClient.readContract({
-          address: CONTRACTS.reliefToken,
+          address: tokenAddr,
           abi: ReliefTokenABI.abi,
           functionName: 'balanceOf',
           args: [walletAddress],
@@ -111,6 +121,7 @@ export default function BeneficiaryDashboard() {
             // Load wallet and balance from blockchain using campaign contract address
             if (campaignData.blockchainAddress) {
               console.log('🔗 Loading from blockchain with address:', campaignData.blockchainAddress);
+              
               const walletFromBlockchain = await loadFromBlockchain(campaignData.blockchainAddress);
               
               // If blockchain has wallet but Firebase doesn't, trust blockchain
@@ -184,11 +195,15 @@ export default function BeneficiaryDashboard() {
   const loadWalletBalance = async (walletAddress) => {
     try {
       console.log('💰 Loading balance for wallet:', walletAddress);
-      const publicClient = getPublicClient(config, { chainId: 80002 });
+      const publicClient = getPublicClient(config);
+      
+      // Use campaign's token address, fallback to global CONTRACTS.reliefToken
+      const tokenToUse = campaignTokenAddress || CONTRACTS.reliefToken;
+      console.log('🪙 Using token address:', tokenToUse);
       
       // Get RELIEF token balance of BeneficiaryWallet
       const balance = await publicClient.readContract({
-        address: CONTRACTS.reliefToken,
+        address: tokenToUse,
         abi: ReliefTokenABI.abi,
         functionName: 'balanceOf',
         args: [walletAddress],
@@ -202,7 +217,7 @@ export default function BeneficiaryDashboard() {
       console.error('❌ ERROR Loading Wallet Balance');
       console.error('━'.repeat(60));
       console.error('Contract Wallet:', contractWalletAddress);
-      console.error('ReliefToken Address:', CONTRACTS.reliefToken);
+      console.error('Token Address Used:', campaignTokenAddress || CONTRACTS.reliefToken);
       console.error('Error:', error.message);
       console.error('');
       console.error('Possible causes:');
@@ -324,34 +339,40 @@ export default function BeneficiaryDashboard() {
       {/* Main Content */}
       <div className="relative z-10 h-full flex flex-col pt-36 pb-4 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto overflow-hidden">
         
-        {/* Debug Panel (only show in development) */}
-        <div className="glass-card border border-yellow-400/30 rounded-xl p-4 mb-4 flex-shrink-0 bg-yellow-900/10">
-          <h3 className="text-sm font-bold text-yellow-300 mb-2">🔍 Debug Info</h3>
-          <div className="text-xs font-mono text-yellow-200/80 space-y-1">
-            <p>✓ Wallet: {address?.slice(0, 6)}...{address?.slice(-4)}</p>
-            <p>✓ Campaign: {campaign ? campaign.title : 'Loading...'}</p>
-            <p>✓ Campaign Address: {campaign?.blockchainAddress || 'Not loaded'}</p>
-            <p>✓ Beneficiary Wallet: {contractWalletAddress ? `${contractWalletAddress.slice(0, 6)}...${contractWalletAddress.slice(-4)}` : 'Not created'}</p>
-            <p>✓ Balance: {currentBalance} RELIEF</p>
-            <p>✓ Loading: {loading ? 'Yes' : 'No'}</p>
-          </div>
-        </div>
-        
         {!contractWalletAddress ? (
           <div className="glass-card border border-white/20 rounded-3xl p-12 backdrop-blur-md bg-white/5 text-center flex-1 flex items-center justify-center">
             <div>
-              <span className="text-6xl mb-4 block">📭</span>
+              <span className="text-6xl mb-4 block">⏳</span>
               <h3 className="text-2xl font-semibold text-white mb-2">
-                No Funds Allocated Yet
+                Waiting for Fund Allocation
               </h3>
               <p className="text-white/70 mb-4">
-                Waiting for organizer approval and fund allocation
+                {userData?.status === 'approved' 
+                  ? "You've been approved! The organizer needs to allocate funds to your wallet."
+                  : "Waiting for organizer approval and fund allocation"
+                }
               </p>
               {campaign && (
-                <div className="mt-4 p-4 glass-card border border-white/10 rounded-xl bg-white/5 inline-block">
-                  <p className="text-sm text-white/90">
-                    Registered for: <strong className="text-green-400">{campaign.title}</strong>
+                <div className="mt-6 p-6 glass-card border border-white/10 rounded-xl bg-white/5 inline-block">
+                  <p className="text-sm text-white/90 mb-3">
+                    Campaign: <strong className="text-green-400">{campaign.title}</strong>
                   </p>
+                  {userData?.status === 'approved' && (
+                    <div className="mt-4 p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
+                      <p className="text-green-400 font-semibold mb-2">✓ Approved</p>
+                      <p className="text-xs text-white/70">
+                        Next step: Organizer will allocate RELIEF tokens to your wallet
+                      </p>
+                    </div>
+                  )}
+                  {userData?.status !== 'approved' && (
+                    <div className="mt-4 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+                      <p className="text-yellow-400 font-semibold mb-2">⏳ Pending Approval</p>
+                      <p className="text-xs text-white/70">
+                        The organizer will review your application soon
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -642,7 +663,7 @@ function SpendFundsModal({ walletAddress, availableBalance, onClose, onSuccess }
       setTxStatus('Checking merchant approval...');
 
       const amountInWei = parseEther(amount);
-      const publicClient = getPublicClient(config, { chainId: 80002 });
+      const publicClient = getPublicClient(config);
 
       console.log('🛒 Spending:', {
         wallet: walletAddress,
