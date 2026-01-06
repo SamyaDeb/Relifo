@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase/config';
 import { collection, addDoc, doc, updateDoc, query, where, onSnapshot, getDoc, getDocs } from 'firebase/firestore';
 import { USER_STATUS } from '../../firebase/constants';
-import { useAccount, useWalletClient, usePublicClient } from 'wagmi';
+import { useAccount, useWalletClient, usePublicClient, useDisconnect } from 'wagmi';
 import { parseEther, encodeFunctionData, formatEther } from 'viem';
 import { getCampaignFactoryContract, parseContractError, getPolygonScanUrl, CONTRACTS } from '../../services/polygonService';
 import { getPublicClient, getWalletClient } from '@wagmi/core';
@@ -14,6 +15,8 @@ import CampaignABI from '../../contracts/Campaign.json';
 
 export default function OrganizerDashboard() {
   const { address, isConnected } = useAccount();
+  const { disconnect } = useDisconnect();
+  const navigate = useNavigate();
   const [campaigns, setCampaigns] = useState([]);
   const [pendingBeneficiaries, setPendingBeneficiaries] = useState([]);
   const [approvedBeneficiaries, setApprovedBeneficiaries] = useState([]);
@@ -372,81 +375,181 @@ export default function OrganizerDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-indigo-600"></div>
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-green-400"></div>
       </div>
     );
   }
 
+  const handleDisconnect = () => {
+    disconnect();
+    navigate('/');
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-4xl font-bold mb-2">Organizer Dashboard</h1>
-              <p className="text-blue-100">Create and manage relief campaigns</p>
-              {isConnected && address && (
-                <p className="text-blue-200 text-sm mt-1">
-                  Connected: {address.slice(0, 6)}...{address.slice(-4)}
-                </p>
-              )}
-            </div>
-            <div className="flex items-center gap-4">
-              <ConnectButton />
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="bg-white text-blue-600 px-6 py-3 rounded-lg font-semibold hover:bg-blue-50 shadow-lg"
-              >
-                + Create Campaign
-              </button>
-            </div>
-          </div>
-        </div>
+    <div className="relative min-h-screen w-full overflow-hidden bg-black">
+      {/* Green Glowing Orbs Background */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[10%] left-[5%] w-[600px] h-[600px] bg-green-400/20 rounded-full blur-[120px] animate-pulse"></div>
+        <div className="absolute top-[60%] right-[10%] w-[500px] h-[500px] bg-emerald-500/15 rounded-full blur-[100px] animate-pulse" style={{ animationDelay: '1s' }}></div>
+        <div className="absolute bottom-[15%] left-[15%] w-[450px] h-[450px] bg-green-500/10 rounded-full blur-[90px] animate-pulse" style={{ animationDelay: '2s' }}></div>
+        <div className="absolute top-[30%] right-[25%] w-[400px] h-[400px] bg-emerald-400/15 rounded-full blur-[110px] animate-pulse" style={{ animationDelay: '0.5s' }}></div>
+        <div className="absolute bottom-[40%] left-[40%] w-[550px] h-[550px] bg-green-300/10 rounded-full blur-[95px] animate-pulse" style={{ animationDelay: '1.5s' }}></div>
+        <div className="absolute top-[5%] right-[5%] w-[350px] h-[350px] bg-emerald-500/20 rounded-full blur-[85px] animate-pulse" style={{ animationDelay: '2.5s' }}></div>
       </div>
 
-      {/* Stats */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-6 gap-6 mb-8">
-          <StatCard title="Total Campaigns" value={campaigns.length} icon="📋" />
-          <StatCard title="Active" value={campaigns.filter(c => c.status === 'active').length} icon="✅" />
-          <StatCard title="Total Raised" value={`$${campaigns.reduce((sum, c) => sum + (c.raised || 0), 0).toLocaleString()}`} icon="💰" />
-          <StatCard title="Total Beneficiaries" value={approvedBeneficiaries.length} icon="👥" />
-          <StatCard title="Pending Approvals" value={pendingBeneficiaries.length} icon="⏳" color="bg-yellow-500" />
-          <StatCard title="Approved" value={approvedBeneficiaries.length} icon="✅" color="bg-green-500" />
+      {/* Floating Dots */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {[...Array(100)].map((_, i) => (
+          <div
+            key={i}
+            className="absolute rounded-full bg-white/30"
+            style={{
+              width: `${Math.random() * 3 + 1}px`,
+              height: `${Math.random() * 3 + 1}px`,
+              top: `${Math.random() * 100}%`,
+              left: `${Math.random() * 100}%`,
+              animation: `float ${Math.random() * 10 + 10}s ease-in-out infinite`,
+              animationDelay: `${Math.random() * 5}s`,
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Navbar */}
+      <div className="fixed top-[20px] left-0 right-0 z-50 py-4 pointer-events-none px-4">
+        <nav className="flex max-w-4xl mx-auto border border-white/20 rounded-3xl bg-white/10 backdrop-blur-md shadow-[0px_2px_3px_-1px_rgba(0,0,0,0.1),0px_1px_0px_0px_rgba(255,255,255,0.1),0px_0px_0px_1px_rgba(255,255,255,0.05)] px-4 py-2 items-center justify-between relative pointer-events-auto">
+          <div className="absolute inset-0 -z-10 bg-gradient-to-r from-white/5 via-gray-100/10 to-white/5 rounded-3xl"></div>
+
+          {/* Logo */}
+          <div className="flex items-center space-x-2">
+            <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 p-2 rounded-full w-8 h-8 flex items-center justify-center">
+              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" />
+              </svg>
+            </div>
+            <span className="text-xl font-semibold text-white">Relifo</span>
+          </div>
+
+          {/* Navigation Links */}
+          <div className="flex items-center space-x-6">
+            <button
+              onClick={() => navigate('/')}
+              className="text-white hover:text-white/80 transition cursor-pointer text-base font-medium"
+            >
+              Home
+            </button>
+            <button
+              onClick={() => navigate('/')}
+              className="text-white hover:text-white/80 transition cursor-pointer text-base font-medium"
+            >
+              About
+            </button>
+            <button
+              className="text-white hover:text-white/80 transition cursor-pointer text-base font-medium"
+            >
+              Dashboard
+            </button>
+          </div>
+
+          {/* Disconnect Button */}
+          <div className="flex items-center">
+            <button
+              onClick={handleDisconnect}
+              className="bg-black hover:bg-gray-900 text-white px-6 py-3 rounded-full border border-white/10 transition-all"
+            >
+              Disconnect
+            </button>
+          </div>
+        </nav>
+      </div>
+
+      {/* Main Content */}
+      <div className="relative z-10 h-full flex flex-col pt-36 pb-4 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto overflow-hidden">
+        {/* Header Card */}
+        <div className="glass-card border border-white/20 rounded-3xl p-6 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all mb-4 flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="text-5xl">🎯</div>
+              <div>
+                <h1 className="text-3xl font-bold text-white">Organizer Dashboard</h1>
+                <p className="text-white/70">Create and manage relief campaigns</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-6 py-3 rounded-full font-semibold hover:from-green-600 hover:to-emerald-600 transition-all"
+            >
+              + Create Campaign
+            </button>
+          </div>
         </div>
 
-        {/* Tabs */}
-        <div className="bg-white rounded-lg shadow mb-8">
-          <div className="border-b">
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4 flex-shrink-0">
+          <div className="glass-card border border-white/20 rounded-2xl p-4 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all">
+            <div className="text-3xl mb-2">📋</div>
+            <div className="text-2xl font-bold text-white">{campaigns.length}</div>
+            <div className="text-white/70 text-sm">Total Campaigns</div>
+          </div>
+          <div className="glass-card border border-white/20 rounded-2xl p-4 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all">
+            <div className="text-3xl mb-2">✅</div>
+            <div className="text-2xl font-bold text-white">{campaigns.filter(c => c.status === 'active').length}</div>
+            <div className="text-white/70 text-sm">Active</div>
+          </div>
+          <div className="glass-card border border-white/20 rounded-2xl p-4 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all">
+            <div className="text-3xl mb-2">💰</div>
+            <div className="text-2xl font-bold text-white">${campaigns.reduce((sum, c) => sum + (c.raised || 0), 0).toLocaleString()}</div>
+            <div className="text-white/70 text-sm">Total Raised</div>
+          </div>
+          <div className="glass-card border border-white/20 rounded-2xl p-4 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all">
+            <div className="text-3xl mb-2">👥</div>
+            <div className="text-2xl font-bold text-white">{approvedBeneficiaries.length}</div>
+            <div className="text-white/70 text-sm">Total Beneficiaries</div>
+          </div>
+          <div className="glass-card border border-yellow-500/30 rounded-2xl p-4 backdrop-blur-md bg-yellow-500/10 hover:bg-yellow-500/20 transition-all">
+            <div className="text-3xl mb-2">⏳</div>
+            <div className="text-2xl font-bold text-yellow-300">{pendingBeneficiaries.length}</div>
+            <div className="text-yellow-200/70 text-sm">Pending Approvals</div>
+          </div>
+          <div className="glass-card border border-green-500/30 rounded-2xl p-4 backdrop-blur-md bg-green-500/10 hover:bg-green-500/20 transition-all">
+            <div className="text-3xl mb-2">✅</div>
+            <div className="text-2xl font-bold text-green-300">{approvedBeneficiaries.length}</div>
+            <div className="text-green-200/70 text-sm">Approved</div>
+          </div>
+        </div>
+
+        {/* Tabs Section */}
+        <div className="glass-card border border-white/20 rounded-3xl backdrop-blur-md bg-white/5 flex-1 flex flex-col min-h-0 overflow-hidden">
+          {/* Tab Headers */}
+          <div className="border-b border-white/20 px-6 flex-shrink-0">
             <nav className="flex -mb-px">
               <button
                 onClick={() => setActiveTab('campaigns')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${
                   activeTab === 'campaigns'
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    ? 'border-green-500 text-green-400'
+                    : 'border-transparent text-white/50 hover:text-white/80 hover:border-white/30'
                 }`}
               >
                 My Campaigns ({campaigns.length})
               </button>
               <button
                 onClick={() => setActiveTab('pending')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${
                   activeTab === 'pending'
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    ? 'border-green-500 text-green-400'
+                    : 'border-transparent text-white/50 hover:text-white/80 hover:border-white/30'
                 }`}
               >
                 Pending Beneficiaries ({pendingBeneficiaries.length})
               </button>
               <button
                 onClick={() => setActiveTab('approved')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 ${
+                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${
                   activeTab === 'approved'
-                    ? 'border-indigo-500 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    ? 'border-green-500 text-green-400'
+                    : 'border-transparent text-white/50 hover:text-white/80 hover:border-white/30'
                 }`}
               >
                 Approved Beneficiaries ({approvedBeneficiaries.length})
@@ -454,20 +557,20 @@ export default function OrganizerDashboard() {
             </nav>
           </div>
 
-          {/* Tab Content */}
-          <div className="p-6">
+          {/* Tab Content - Scrollable */}
+          <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
             {activeTab === 'campaigns' && (
               <>
                 {campaigns.length === 0 ? (
                   <div className="text-center py-12">
                     <span className="text-6xl mb-4 block">🚀</span>
-                    <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                    <h3 className="text-xl font-semibold text-white mb-2">
                       No campaigns yet
                     </h3>
-                    <p className="text-gray-600 mb-6">Create your first relief campaign to start helping people</p>
+                    <p className="text-white/70 mb-6">Create your first relief campaign to start helping people</p>
                     <button
                       onClick={() => setShowCreateModal(true)}
-                      className="bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700"
+                      className="bg-gradient-to-r from-green-500 to-emerald-500 text-white px-6 py-3 rounded-full font-semibold hover:from-green-600 hover:to-emerald-600"
                     >
                       Create Campaign
                     </button>
@@ -495,10 +598,10 @@ export default function OrganizerDashboard() {
                 {pendingBeneficiaries.length === 0 ? (
                   <div className="text-center py-12">
                     <span className="text-6xl mb-4 block">🎉</span>
-                    <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                    <h3 className="text-xl font-semibold text-white mb-2">
                       All caught up!
                     </h3>
-                    <p className="text-gray-600">No pending beneficiary applications at the moment</p>
+                    <p className="text-white/70">No pending beneficiary applications at the moment</p>
                   </div>
                 ) : (
                   pendingBeneficiaries.map(beneficiary => (
@@ -521,10 +624,10 @@ export default function OrganizerDashboard() {
                 {approvedBeneficiaries.length === 0 ? (
                   <div className="text-center py-12">
                     <span className="text-6xl mb-4 block">📋</span>
-                    <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                    <h3 className="text-xl font-semibold text-white mb-2">
                       No approved beneficiaries yet
                     </h3>
-                    <p className="text-gray-600">Approved beneficiaries will appear here</p>
+                    <p className="text-white/70">Approved beneficiaries will appear here</p>
                   </div>
                 ) : (
                   approvedBeneficiaries.map(beneficiary => (
@@ -543,10 +646,40 @@ export default function OrganizerDashboard() {
             )}
           </div>
         </div>
-
-        {/* Campaigns - Legacy section kept for backward compatibility, can be removed */}
-        {/* Old campaigns section removed as it's now in tabs */}
       </div>
+
+      <style>{`
+        @keyframes float {
+          0%, 100% {
+            transform: translateY(0px);
+          }
+          50% {
+            transform: translateY(-20px);
+          }
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 10px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(34, 197, 94, 0.5);
+          border-radius: 10px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(34, 197, 94, 0.7);
+        }
+
+        .glass-card {
+          box-shadow: 0 8px 32px 0 rgba(0, 255, 100, 0.1);
+        }
+      `}</style>
 
       {/* Create Campaign Modal */}
       {showCreateModal && (
@@ -597,21 +730,21 @@ function CampaignCard({ campaign, approvedBeneficiaries = [], onAllocateFunds })
   const progress = (campaign.raised / campaign.goal) * 100;
 
   return (
-    <div className="border rounded-lg p-6 hover:shadow-md transition-shadow">
+    <div className="border border-white/20 rounded-2xl p-6 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all">
       <div className="flex justify-between items-start mb-4">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-2">
-            <h3 className="text-xl font-semibold text-gray-900">{campaign.title}</h3>
+            <h3 className="text-xl font-semibold text-white">{campaign.title}</h3>
           </div>
-          <p className="text-gray-600">{campaign.description}</p>
+          <p className="text-white/70">{campaign.description}</p>
           {campaign.blockchainAddress && (
-            <p className="text-xs text-gray-500 mt-2 font-mono">
+            <p className="text-xs text-green-400 mt-2 font-mono">
               📍 {campaign.blockchainAddress.slice(0, 10)}...{campaign.blockchainAddress.slice(-8)}
             </p>
           )}
         </div>
         <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-          campaign.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+          campaign.status === 'active' ? 'bg-green-500/20 text-green-300 border border-green-500/30' : 'bg-white/10 text-white/70 border border-white/20'
         }`}>
           {campaign.status}
         </span>
@@ -621,12 +754,12 @@ function CampaignCard({ campaign, approvedBeneficiaries = [], onAllocateFunds })
         {/* Progress Bar */}
         <div>
           <div className="flex justify-between text-sm mb-1">
-            <span className="text-gray-600">Progress</span>
-            <span className="font-semibold text-gray-900">{progress.toFixed(1)}%</span>
+            <span className="text-white/70">Progress</span>
+            <span className="font-semibold text-white">{progress.toFixed(1)}%</span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-3">
+          <div className="w-full bg-white/10 rounded-full h-3 border border-white/20">
             <div
-              className="bg-gradient-to-r from-blue-500 to-indigo-600 h-3 rounded-full transition-all"
+              className="bg-gradient-to-r from-green-500 to-emerald-600 h-3 rounded-full transition-all"
               style={{ width: `${Math.min(progress, 100)}%` }}
             />
           </div>
@@ -635,25 +768,25 @@ function CampaignCard({ campaign, approvedBeneficiaries = [], onAllocateFunds })
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4 pt-2">
           <div>
-            <p className="text-sm text-gray-500">Raised</p>
-            <p className="text-lg font-bold text-gray-900">{(campaign.raised || 0).toLocaleString()} RELIEF</p>
+            <p className="text-sm text-white/70">Raised</p>
+            <p className="text-lg font-bold text-white">{(campaign.raised || 0).toLocaleString()} RELIEF</p>
           </div>
           <div>
-            <p className="text-sm text-gray-500">Goal</p>
-            <p className="text-lg font-bold text-gray-900">{campaign.goal.toLocaleString()} RELIEF</p>
+            <p className="text-sm text-white/70">Goal</p>
+            <p className="text-lg font-bold text-white">{campaign.goal.toLocaleString()} RELIEF</p>
           </div>
           <div>
-            <p className="text-sm text-gray-500">Available Beneficiaries</p>
-            <p className="text-lg font-bold text-gray-900">{approvedBeneficiaries.length}</p>
+            <p className="text-sm text-white/70">Available Beneficiaries</p>
+            <p className="text-lg font-bold text-white">{approvedBeneficiaries.length}</p>
           </div>
         </div>
 
         {/* Actions */}
-        <div className="flex gap-2 pt-4 border-t">
+        <div className="flex gap-2 pt-4 border-t border-white/20">
           <button 
             onClick={() => onAllocateFunds(campaign)}
             disabled={!campaign.blockchainAddress || approvedBeneficiaries.length === 0 || (campaign.raised || 0) === 0}
-            className="flex-1 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-2 rounded-lg hover:from-green-600 hover:to-emerald-600 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
           >
             💰 Allocate Funds
           </button>
@@ -662,7 +795,7 @@ function CampaignCard({ campaign, approvedBeneficiaries = [], onAllocateFunds })
               href={getPolygonScanUrl(campaign.txHash)}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg hover:bg-gray-200 font-semibold text-center"
+              className="flex-1 bg-white/10 text-white py-2 rounded-lg hover:bg-white/20 font-semibold text-center border border-white/20"
             >
               View on PolygonScan ↗
             </a>
@@ -1330,61 +1463,61 @@ If you're connected with the wrong wallet:
 
 function ApprovedBeneficiaryCard({ beneficiary, campaign, onAllocateFunds }) {
   return (
-    <div className="border-2 border-green-200 rounded-xl p-6 hover:shadow-lg transition-all bg-white">
+    <div className="border-2 border-green-500/30 rounded-xl p-6 hover:bg-white/10 transition-all bg-white/5 backdrop-blur-md">
       {/* Header */}
-      <div className="flex items-start justify-between mb-6 pb-4 border-b-2 border-gray-100">
+      <div className="flex items-start justify-between mb-6 pb-4 border-b-2 border-white/10">
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-2">
-            <h3 className="text-2xl font-bold text-gray-900">{beneficiary.name}</h3>
-            <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-green-100 text-green-700">
+            <h3 className="text-2xl font-bold text-white">{beneficiary.name}</h3>
+            <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-green-500/20 text-green-300 border border-green-500/30">
               ✅ APPROVED ON-CHAIN
             </span>
             {beneficiary.hasWallet ? (
-              <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-blue-100 text-blue-700">
+              <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
                 💰 {beneficiary.allocatedAmount || '0'} RELIEF ALLOCATED
               </span>
             ) : (
-              <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-yellow-100 text-yellow-700">
+              <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
                 ⏳ AWAITING FUND ALLOCATION
               </span>
             )}
           </div>
-          <p className="text-gray-600 text-sm">
-            Campaign: <span className="font-semibold text-indigo-600">{beneficiary.campaignTitle || campaign?.title || 'Unknown Campaign'}</span>
+          <p className="text-white/70 text-sm">
+            Campaign: <span className="font-semibold text-green-400">{beneficiary.campaignTitle || campaign?.title || 'Unknown Campaign'}</span>
           </p>
         </div>
       </div>
 
       {/* Details */}
-      <div className="bg-gray-50 rounded-lg p-5 mb-4">
+      <div className="bg-white/5 rounded-lg p-5 mb-4 border border-white/10">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Organization */}
           {beneficiary.organization && beneficiary.organization !== 'N/A' && (
-            <div className="bg-white rounded-lg p-3 border border-gray-200">
-              <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Organization</span>
-              <p className="text-gray-900 font-medium">{beneficiary.organization}</p>
+            <div className="bg-white/5 rounded-lg p-3 border border-white/20">
+              <span className="text-xs font-semibold text-white/70 uppercase block mb-1">Organization</span>
+              <p className="text-white font-medium">{beneficiary.organization}</p>
             </div>
           )}
 
           {/* Campaign */}
-          <div className="bg-white rounded-lg p-3 border border-gray-200">
-            <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Campaign</span>
-            <p className="text-gray-900 font-medium">{beneficiary.campaignTitle || campaign?.title || 'N/A'}</p>
+          <div className="bg-white/5 rounded-lg p-3 border border-white/20">
+            <span className="text-xs font-semibold text-white/70 uppercase block mb-1">Campaign</span>
+            <p className="text-white font-medium">{beneficiary.campaignTitle || campaign?.title || 'N/A'}</p>
           </div>
         </div>
 
         {/* Wallet Address */}
-        <div className="bg-white rounded-lg p-3 border border-gray-200 mt-4">
-          <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Polygon Wallet Address</span>
-          <p className="text-gray-900 font-mono text-sm break-all">{beneficiary.walletAddress || beneficiary.id}</p>
+        <div className="bg-white/5 rounded-lg p-3 border border-white/20 mt-4">
+          <span className="text-xs font-semibold text-white/70 uppercase block mb-1">Polygon Wallet Address</span>
+          <p className="text-green-400 font-mono text-sm break-all">{beneficiary.walletAddress || beneficiary.id}</p>
         </div>
 
         {/* Beneficiary Wallet Contract (if exists) */}
         {beneficiary.hasWallet && beneficiary.walletContract && (
-          <div className="bg-green-50 rounded-lg p-3 border border-green-200 mt-4">
-            <span className="text-xs font-semibold text-green-700 uppercase block mb-1">Beneficiary Wallet Contract</span>
-            <p className="text-green-900 font-mono text-sm break-all">{beneficiary.walletContract}</p>
-            <p className="text-green-700 text-sm mt-2">
+          <div className="bg-green-500/10 rounded-lg p-3 border border-green-500/30 mt-4">
+            <span className="text-xs font-semibold text-green-300 uppercase block mb-1">Beneficiary Wallet Contract</span>
+            <p className="text-green-400 font-mono text-sm break-all">{beneficiary.walletContract}</p>
+            <p className="text-green-300 text-sm mt-2">
               <strong>Allocated:</strong> {beneficiary.allocatedAmount} RELIEF tokens
             </p>
           </div>
@@ -1393,7 +1526,7 @@ function ApprovedBeneficiaryCard({ beneficiary, campaign, onAllocateFunds }) {
 
       {/* Allocate Funds Button (only if no wallet yet) */}
       {!beneficiary.hasWallet && (
-        <div className="pt-4 border-t-2 border-gray-100">
+        <div className="pt-4 border-t-2 border-white/10">
           <button
             onClick={onAllocateFunds}
             className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white py-4 rounded-lg font-bold text-lg transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
@@ -1422,36 +1555,36 @@ function BeneficiaryCard({ beneficiary, campaign, onApprove, onReject, showActio
   };
 
   return (
-    <div className="border-2 border-gray-200 rounded-xl p-6 hover:shadow-lg transition-all bg-white">
+    <div className="border-2 border-white/20 rounded-xl p-6 hover:bg-white/10 transition-all bg-white/5 backdrop-blur-md">
       {/* Header */}
-      <div className="flex items-start justify-between mb-6 pb-4 border-b-2 border-gray-100">
+      <div className="flex items-start justify-between mb-6 pb-4 border-b-2 border-white/10">
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-2">
-            <h3 className="text-2xl font-bold text-gray-900">{beneficiary.name}</h3>
-            <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-purple-100 text-purple-700">
+            <h3 className="text-2xl font-bold text-white">{beneficiary.name}</h3>
+            <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
               🤝 BENEFICIARY
             </span>
             {beneficiary.isApprovedOnChain && (
-              <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-green-100 text-green-700">
+              <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-green-500/20 text-green-300 border border-green-500/30">
                 ✅ ON-CHAIN APPROVED
               </span>
             )}
             {beneficiary.hasWallet && (
-              <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-blue-100 text-blue-700">
+              <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
                 💰 {beneficiary.allocatedAmount || '0'} RELIEF
               </span>
             )}
           </div>
-          <p className="text-gray-600 text-sm">
-            Applied for: <span className="font-semibold text-indigo-600">{beneficiary.campaignTitle || campaign?.title || 'Unknown Campaign'}</span>
+          <p className="text-white/70 text-sm">
+            Applied for: <span className="font-semibold text-green-400">{beneficiary.campaignTitle || campaign?.title || 'Unknown Campaign'}</span>
           </p>
         </div>
       </div>
 
       {/* Application Details */}
-      <div className="bg-gray-50 rounded-lg p-5 mb-4">
-        <h4 className="font-bold text-gray-900 mb-3 text-lg flex items-center gap-2">
-          <svg className="w-5 h-5 text-indigo-600" fill="currentColor" viewBox="0 0 20 20">
+      <div className="bg-white/5 rounded-lg p-5 mb-4 border border-white/10">
+        <h4 className="font-bold text-white mb-3 text-lg flex items-center gap-2">
+          <svg className="w-5 h-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
             <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
             <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd"/>
           </svg>
@@ -1461,46 +1594,46 @@ function BeneficiaryCard({ beneficiary, campaign, onApprove, onReject, showActio
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Organization */}
           {beneficiary.organization && beneficiary.organization !== 'N/A' && (
-            <div className="bg-white rounded-lg p-3 border border-gray-200">
-              <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Organization</span>
-              <p className="text-gray-900 font-medium">{beneficiary.organization}</p>
+            <div className="bg-white/5 rounded-lg p-3 border border-white/20">
+              <span className="text-xs font-semibold text-white/70 uppercase block mb-1">Organization</span>
+              <p className="text-white font-medium">{beneficiary.organization}</p>
             </div>
           )}
 
           {/* Campaign */}
-          <div className="bg-white rounded-lg p-3 border border-gray-200">
-            <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Campaign</span>
-            <p className="text-gray-900 font-medium">{beneficiary.campaignTitle || campaign?.title || 'N/A'}</p>
+          <div className="bg-white/5 rounded-lg p-3 border border-white/20">
+            <span className="text-xs font-semibold text-white/70 uppercase block mb-1">Campaign</span>
+            <p className="text-white font-medium">{beneficiary.campaignTitle || campaign?.title || 'N/A'}</p>
           </div>
         </div>
 
         {/* Wallet Address */}
-        <div className="bg-white rounded-lg p-3 border border-gray-200 mt-4">
-          <span className="text-xs font-semibold text-gray-500 uppercase block mb-1">Polygon Wallet Address</span>
-          <p className="text-gray-900 font-mono text-sm break-all">{beneficiary.walletAddress || beneficiary.id}</p>
+        <div className="bg-white/5 rounded-lg p-3 border border-white/20 mt-4">
+          <span className="text-xs font-semibold text-white/70 uppercase block mb-1">Polygon Wallet Address</span>
+          <p className="text-green-400 font-mono text-sm break-all">{beneficiary.walletAddress || beneficiary.id}</p>
         </div>
 
         {/* Beneficiary Wallet Contract (if exists) */}
         {beneficiary.hasWallet && beneficiary.walletContract && (
-          <div className="bg-green-50 rounded-lg p-3 border border-green-200 mt-4">
-            <span className="text-xs font-semibold text-green-700 uppercase block mb-1">Beneficiary Wallet Contract</span>
-            <p className="text-green-900 font-mono text-sm break-all">{beneficiary.walletContract}</p>
+          <div className="bg-green-500/10 rounded-lg p-3 border border-green-500/30 mt-4">
+            <span className="text-xs font-semibold text-green-300 uppercase block mb-1">Beneficiary Wallet Contract</span>
+            <p className="text-green-400 font-mono text-sm break-all">{beneficiary.walletContract}</p>
           </div>
         )}
 
         {/* Description/Reason */}
         {beneficiary.description && (
-          <div className="bg-white rounded-lg p-4 border border-gray-200 mt-4">
-            <span className="text-xs font-semibold text-gray-500 uppercase block mb-2">
+          <div className="bg-white/5 rounded-lg p-4 border border-white/20 mt-4">
+            <span className="text-xs font-semibold text-white/70 uppercase block mb-2">
               Why They Need Relief Funds
             </span>
-            <p className="text-gray-900 leading-relaxed">{beneficiary.description}</p>
+            <p className="text-white leading-relaxed">{beneficiary.description}</p>
           </div>
         )}
 
         {/* Verification Document */}
         {beneficiary.documentUrl && (
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-200 mt-4">
+          <div className="bg-gradient-to-r from-blue-500/20 to-indigo-500/20 rounded-lg p-4 border-2 border-blue-500/30 mt-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="bg-blue-500 text-white rounded-lg p-3">
@@ -1509,8 +1642,8 @@ function BeneficiaryCard({ beneficiary, campaign, onApprove, onReject, showActio
                   </svg>
                 </div>
                 <div>
-                  <span className="text-xs font-semibold text-blue-700 uppercase block">Verification Document</span>
-                  <p className="text-sm text-blue-900 font-medium">PDF Document Uploaded</p>
+                  <span className="text-xs font-semibold text-blue-300 uppercase block">Verification Document</span>
+                  <p className="text-sm text-blue-200 font-medium">PDF Document Uploaded</p>
                 </div>
               </div>
               <a
@@ -1532,7 +1665,7 @@ function BeneficiaryCard({ beneficiary, campaign, onApprove, onReject, showActio
 
       {/* Action Buttons */}
       {showActions && (
-        <div className="flex gap-3 pt-4 border-t-2 border-gray-100">
+        <div className="flex gap-3 pt-4 border-t-2 border-white/10">
           <button
             onClick={() => onApprove(beneficiary)}
             disabled={isProcessing}
