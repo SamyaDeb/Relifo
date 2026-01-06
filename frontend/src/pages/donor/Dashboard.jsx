@@ -178,13 +178,13 @@ export default function DonorDashboard() {
       </div>
 
       {/* Navbar */}
-      <div className="fixed top-[25px] left-0 right-0 z-50 py-4 pointer-events-none px-4">
-        <nav className="flex max-w-4xl mx-auto border border-white/20 rounded-3xl bg-white/10 backdrop-blur-md shadow-[0px_2px_3px_-1px_rgba(0,0,0,0.1),0px_1px_0px_0px_rgba(255,255,255,0.1),0px_0px_0px_1px_rgba(255,255,255,0.05)] px-4 py-2 items-center justify-between gap-[3px] relative pointer-events-auto">
-          <div className="absolute inset-0 -z-10 bg-gradient-to-r from-white/5 via-gray-100/10 to-white/5 rounded-3xl pointer-events-none"></div>
-          
+      <div className="fixed top-[20px] left-0 right-0 z-50 py-4 pointer-events-none px-4">
+        <nav className="flex max-w-4xl mx-auto border border-white/20 rounded-3xl bg-white/10 backdrop-blur-md shadow-[0px_2px_3px_-1px_rgba(0,0,0,0.1),0px_1px_0px_0px_rgba(255,255,255,0.1),0px_0px_0px_1px_rgba(255,255,255,0.05)] px-4 py-2 items-center justify-between relative pointer-events-auto">
+          <div className="absolute inset-0 -z-10 bg-gradient-to-r from-white/5 via-gray-100/10 to-white/5 rounded-3xl"></div>
+
           {/* Logo */}
-          <div className="flex items-center space-x-2 w-[150px] ml-[5px]">
-            <div className="bg-gradient-to-r from-green-500 to-emerald-500 p-2 rounded-full w-8 h-8 flex items-center justify-center">
+          <div className="flex items-center space-x-2">
+            <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 p-2 rounded-full w-8 h-8 flex items-center justify-center">
               <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" />
               </svg>
@@ -192,31 +192,34 @@ export default function DonorDashboard() {
             <span className="text-xl font-semibold text-white">Relifo</span>
           </div>
 
-          {/* Nav Links */}
-          <div className="flex items-center space-x-5 -ml-[10px] relative z-10">
-            <button onClick={() => navigate('/')} className="relative text-white hover:text-white/80 items-center flex space-x-1 transition cursor-pointer">
-              <span className="hidden sm:block text-base text-white font-medium">Home</span>
+          {/* Navigation Links */}
+          <div className="flex items-center space-x-6">
+            <button
+              onClick={() => navigate('/')}
+              className="text-white hover:text-white/80 transition cursor-pointer text-base font-medium"
+            >
+              Home
             </button>
-            <button onClick={() => scrollToSection('about')} className="relative text-white hover:text-white/80 items-center flex space-x-1 transition cursor-pointer">
-              <span className="hidden sm:block text-base text-white font-medium">About</span>
+            <button
+              onClick={() => navigate('/')}
+              className="text-white hover:text-white/80 transition cursor-pointer text-base font-medium"
+            >
+              About
             </button>
-            <button className="relative text-white hover:text-white/80 items-center flex space-x-1 transition cursor-pointer">
-              <span className="hidden sm:block text-base text-white font-medium">Dashboard</span>
+            <button
+              className="text-white hover:text-white/80 transition cursor-pointer text-base font-medium"
+            >
+              Dashboard
             </button>
           </div>
 
           {/* Disconnect Button */}
-          <div className="flex items-center space-x-2 relative z-10">
+          <div className="flex items-center">
             <button
               onClick={handleDisconnect}
-              className="group relative flex cursor-pointer items-center justify-center whitespace-nowrap border border-white/10 px-6 py-3 text-white bg-black rounded-[100px] transform-gpu transition-transform duration-300 ease-in-out active:translate-y-px w-[150px] overflow-visible"
+              className="bg-black hover:bg-gray-900 text-white px-6 py-3 rounded-full border border-white/10 transition-all"
             >
-              <div className="pointer-events-none absolute inset-0 rounded-[inherit] border border-transparent [mask-clip:padding-box,border-box] [mask-composite:intersect] [mask-image:linear-gradient(transparent,transparent),linear-gradient(#000,#000)]">
-                <div className="absolute aspect-square bg-gradient-to-l from-[#10b981] to-transparent animate-border-orbit opacity-90" style={{width: '51px', offsetPath: 'rect(0px auto auto 0px round 40px)'}}></div>
-              </div>
-              <span className="relative z-20">Disconnect</span>
-              <div className="pointer-events-none insert-0 absolute size-full rounded-2xl px-4 py-1.5 text-sm font-medium shadow-[inset_0_-8px_10px_#ffffff1f] transform-gpu transition-all duration-300 ease-in-out group-hover:shadow-[inset_0_-6px_10px_#ffffff3f] group-active:shadow-[inset_0_-10px_10px_#ffffff3f]"></div>
-              <div className="pointer-events-none absolute -z-10 bg-black rounded-[100px] inset-[0.05em]"></div>
+              Disconnect
             </button>
           </div>
         </nav>
