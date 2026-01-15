@@ -13,8 +13,9 @@ export default function DonorDashboard() {
   const [loading, setLoading] = useState(true);
   const [donateModalOpen, setDonateModalOpen] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState(null);
-  const [showBuyTokensModal, setShowBuyTokensModal] = useState(false);
-  const [reliefBalance, setReliefBalance] = useState('0');
+  const [usdcBalance, setUsdcBalance] = useState('0');
+  const [networkStatus, setNetworkStatus] = useState('checking');
+  const [buyUsdcModalOpen, setBuyUsdcModalOpen] = useState(false);
   const { address } = useAccount();
   const { disconnect } = useDisconnect();
   const navigate = useNavigate();
@@ -27,11 +28,11 @@ export default function DonorDashboard() {
 
     console.log('🔄 Donor Dashboard: Setting up listeners for', address);
     
-    loadReliefBalance();
+    loadUSDCBalance();
     
     // Refresh balance every 5 seconds for real-time updates
     const balanceInterval = setInterval(() => {
-      loadReliefBalance();
+      loadUSDCBalance();
     }, 5000);
 
     // Set up real-time listeners
@@ -92,32 +93,75 @@ export default function DonorDashboard() {
 
     setupListeners();
     
+    // Listen for donation completion event to reload balance
+    const handleBalanceReload = () => {
+      console.log('🔄 Donation completed, reloading USDC balance...');
+      loadUSDCBalance();
+    };
+    
+    window.addEventListener('reloadUSDCBalance', handleBalanceReload);
+    
     // Cleanup function
     return () => {
       console.log('🧹 Donor Dashboard: Cleaning up listeners');
       clearInterval(balanceInterval);
+      window.removeEventListener('reloadUSDCBalance', handleBalanceReload);
       if (unsubscribeCampaigns) unsubscribeCampaigns();
       if (unsubscribeDonations) unsubscribeDonations();
     };
   }, [address]);
 
-  const loadReliefBalance = async () => {
-    if (!address) return;
+  const loadUSDCBalance = async () => {
+    if (!address) {
+      console.log('⚠️ No address, skipping balance load');
+      return;
+    }
+    
     try {
-      const { publicClient } = await import('wagmi/actions');
-      const { getPublicClient } = await import('@wagmi/core');
-      const { config } = await import('../../config/wagmiConfig');
+      const USDC_ADDRESS = '0x8B0180f2101c8260d49339abfEe87927412494B4'; // User's actual USDC contract
+      console.log('💰 Loading USDC balance for:', address);
+      console.log('💰 USDC contract:', USDC_ADDRESS);
       
-      const client = getPublicClient(config, { chainId: 80002 });
-      const balance = await client.readContract({
-        address: polygonService.CONTRACTS.reliefToken,
-        abi: (await import('../../contracts/ReliefToken.json')).default.abi,
-        functionName: 'balanceOf',
-        args: [address],
+      if (typeof window.ethereum === 'undefined') {
+        console.error('❌ MetaMask not found!');
+        return;
+      }
+
+      // Check current network
+      const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+      console.log('🌐 Current chain ID:', chainId, '(should be 0x13882 for Polygon Amoy)');
+      
+      if (chainId !== '0x13882') {
+        console.error('❌ Wrong network! Please switch to Polygon Amoy (Chain ID: 80002)');
+        setNetworkStatus('wrong');
+        setUsdcBalance('0.00');
+        return;
+      }
+      
+      setNetworkStatus('correct');
+
+      // balanceOf(address) function selector = 0x70a08231
+      const data = '0x70a08231' + address.slice(2).padStart(64, '0');
+      console.log('📤 Calling balanceOf with data:', data);
+      
+      const result = await window.ethereum.request({
+        method: 'eth_call',
+        params: [{
+          to: USDC_ADDRESS,
+          data: data
+        }, 'latest']
       });
-      setReliefBalance(formatEther(balance));
+      
+      console.log('📥 Raw result:', result);
+      const balanceRaw = parseInt(result, 16);
+      const formattedBalance = (balanceRaw / 1e6).toFixed(2);
+      console.log('✅ USDC balance loaded:', formattedBalance, 'USDC (raw:', balanceRaw, ')');
+      setUsdcBalance(formattedBalance);
+      
     } catch (error) {
-      console.error('Error loading RELIEF balance:', error);
+      console.error('❌ Error loading USDC balance:', error);
+      console.error('Error details:', error.message);
+      setUsdcBalance('0.00');
     }
   };
 
@@ -126,8 +170,38 @@ export default function DonorDashboard() {
     navigate('/');
   };
 
-  const handleAddTokens = () => {
-    setShowBuyTokensModal(true);
+  const switchToPolygonAmoy = async () => {
+    try {
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x13882' }], // 80002 in hex
+      });
+      setNetworkStatus('correct');
+      // Reload balance after switching
+      setTimeout(() => loadUSDCBalance(), 1000);
+    } catch (error) {
+      if (error.code === 4902) {
+        // Network not added, add it
+        try {
+          await window.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: '0x13882',
+              chainName: 'Polygon Amoy Testnet',
+              nativeCurrency: { name: 'POL', symbol: 'POL', decimals: 18 },
+              rpcUrls: ['https://rpc-amoy.polygon.technology/'],
+              blockExplorerUrls: ['https://amoy.polygonscan.com/']
+            }]
+          });
+          setNetworkStatus('correct');
+          setTimeout(() => loadUSDCBalance(), 1000);
+        } catch (addError) {
+          console.error('Failed to add network:', addError);
+        }
+      } else {
+        console.error('Failed to switch network:', error);
+      }
+    }
   };
 
   const scrollToSection = (sectionId) => {
@@ -238,22 +312,35 @@ export default function DonorDashboard() {
             
             <div className="mb-4">
               <h3 className="text-base font-semibold text-white mb-2">
-                Relief Token Balance — {parseFloat(reliefBalance).toFixed(2)}
+                USDC Balance — ${parseFloat(usdcBalance).toFixed(2)}
               </h3>
+              <p className="text-white/40 text-xs">Stablecoin for donations</p>
+              
+              {networkStatus === 'wrong' && (
+                <div className="mt-2 p-2 bg-red-500/20 border border-red-500/50 rounded-lg">
+                  <p className="text-red-400 text-xs mb-2">⚠️ Wrong Network</p>
+                  <button
+                    onClick={switchToPolygonAmoy}
+                    className="w-full bg-red-600 hover:bg-red-700 text-white text-xs py-1 rounded"
+                  >
+                    Switch to Polygon Amoy
+                  </button>
+                </div>
+              )}
             </div>
 
             <button
-              onClick={handleAddTokens}
-              className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-2 rounded-2xl font-semibold hover:shadow-lg hover:shadow-green-500/50 transition-all text-sm mt-auto flex-shrink-0"
+              onClick={() => setBuyUsdcModalOpen(true)}
+              className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 text-white py-2 rounded-2xl font-semibold hover:shadow-lg hover:shadow-blue-500/50 transition-all text-sm mt-auto flex-shrink-0"
             >
-              Add Tokens
+              💰 Add USDC
             </button>
           </div>
 
           {/* Right Card - Donation Stats */}
           <div className="glass-card border border-white/20 rounded-3xl p-5 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all h-[200px] flex flex-col">
             <h2 className="text-lg font-semibold text-white mb-2 flex-shrink-0">
-              Total Donated: {stats.totalDonated.toFixed(2)} RELIEF
+              Total Donated: ${stats.totalDonated.toFixed(2)} USDC
             </h2>
             <p className="text-xs text-white/60 mb-3">From {donations.length} donation{donations.length !== 1 ? 's' : ''} to {stats.campaignsSupported} campaign{stats.campaignsSupported !== 1 ? 's' : ''}</p>
             
@@ -266,7 +353,7 @@ export default function DonorDashboard() {
                   donations.slice(0, 5).map(donation => (
                     <div key={donation.id} className="flex justify-between items-center text-xs border-b border-white/10 pb-1">
                       <span className="text-white/80 truncate mr-2">{donation.campaignTitle || 'Campaign'}</span>
-                      <span className="text-green-400 font-semibold whitespace-nowrap">{parseFloat(donation.amount).toFixed(2)} RELIEF</span>
+                      <span className="text-green-400 font-semibold whitespace-nowrap">${parseFloat(donation.amount).toFixed(2)} USDC</span>
                     </div>
                   ))
                 )}
@@ -320,8 +407,8 @@ export default function DonorDashboard() {
                     <div className="flex justify-between items-center mb-2">
                       <h3 className="text-xs font-semibold text-white truncate mr-2">{campaign.title}</h3>
                       <div className="flex flex-col items-end">
-                        <span className="text-green-400 font-semibold text-xs whitespace-nowrap">You: {totalSupported.toFixed(2)} RELIEF</span>
-                        <span className="text-white/40 text-[10px] whitespace-nowrap">Total: {campaign.raised?.toFixed(2) || 0} RELIEF</span>
+                        <span className="text-green-400 font-semibold text-xs whitespace-nowrap">You: ${totalSupported.toFixed(2)} USDC</span>
+                        <span className="text-white/40 text-[10px] whitespace-nowrap">Total: ${campaign.raised?.toFixed(2) || 0} USDC</span>
                       </div>
                     </div>
                     
@@ -334,7 +421,7 @@ export default function DonorDashboard() {
                         />
                       </div>
                       <div className="flex justify-between text-xs text-white/40 mt-1">
-                        <span>Goal: {campaign.goal?.toFixed(1) || 0} RELIEF</span>
+                        <span>Goal: ${campaign.goal?.toFixed(1) || 0} USDC</span>
                         <span>{progress.toFixed(0)}%</span>
                       </div>
                     </div>
@@ -364,18 +451,7 @@ export default function DonorDashboard() {
           onClose={() => {
             setDonateModalOpen(false);
             setSelectedCampaign(null);
-            loadReliefBalance();
-          }}
-        />
-      )}
-
-      {/* Buy Tokens Modal */}
-      {showBuyTokensModal && (
-        <BuyTokensModal
-          onClose={() => setShowBuyTokensModal(false)}
-          onSuccess={() => {
-            setShowBuyTokensModal(false);
-            loadReliefBalance();
+            loadUSDCBalance();
           }}
         />
       )}
@@ -434,182 +510,25 @@ export default function DonorDashboard() {
           background: rgba(16, 185, 129, 0.7);
         }
       `}</style>
-    </div>
-  );
-}
 
-// Buy Tokens Modal Component
-function BuyTokensModal({ onClose, onSuccess }) {
-  const { address } = useAccount();
-  const { data: walletClient } = useWalletClient();
-  const [tokenAmount, setTokenAmount] = useState('');
-  const [polAmount, setPolAmount] = useState('0');
-  const [txStatus, setTxStatus] = useState('');
-  const [txHash, setTxHash] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
+      {/* Buy USDC Modal */}
+      {buyUsdcModalOpen && (
+        <BuyUsdcModal 
+          onClose={() => setBuyUsdcModalOpen(false)} 
+          onSuccess={loadUSDCBalance}
+        />
+      )}
 
-  // Calculate POL amount (1 POL = 1 RELIEF)
-  useEffect(() => {
-    if (tokenAmount && !isNaN(tokenAmount)) {
-      setPolAmount(tokenAmount);
-    } else {
-      setPolAmount('0');
-    }
-  }, [tokenAmount]);
-
-  const handleBuyTokens = async () => {
-    if (!tokenAmount || parseFloat(tokenAmount) <= 0) {
-      alert('Please enter a valid token amount');
-      return;
-    }
-
-    if (!walletClient) {
-      alert('Wallet not connected. Please connect your wallet first.');
-      return;
-    }
-
-    setIsProcessing(true);
-    setTxStatus('Preparing transaction...');
-
-    try {
-      const amountInWei = parseUnits(tokenAmount, 18);
-      const ReliefTokenSaleABI = (await import('../../contracts/ReliefTokenSale.json')).default.abi;
-
-      setTxStatus('Confirm transaction in MetaMask...');
-
-      // Buy tokens by sending POL
-      const tx = await walletClient.writeContract({
-        address: polygonService.CONTRACTS.reliefTokenSale,
-        abi: ReliefTokenSaleABI,
-        functionName: 'buyTokens',
-        args: [],
-        value: amountInWei,
-      });
-
-      setTxHash(tx);
-      setTxStatus('Transaction submitted! Waiting for confirmation...');
-
-      // Wait for transaction confirmation
-      const { publicClient } = await import('wagmi/actions');
-      const { getPublicClient } = await import('@wagmi/core');
-      const { config } = await import('../../config/wagmiConfig');
-      const client = getPublicClient(config, { chainId: 80002 });
-      await client.waitForTransactionReceipt({ hash: tx });
-
-      setTxStatus('Success! Tokens purchased.');
-      setTimeout(() => {
-        onSuccess();
-      }, 2000);
-    } catch (error) {
-      console.error('Error buying tokens:', error);
-      const errorMessage = error?.message || error?.shortMessage || 'Transaction failed';
-      setTxStatus(`Error: ${errorMessage}`);
-      setIsProcessing(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="glass-card border border-white/20 rounded-3xl p-6 max-w-md w-full bg-black/90 backdrop-blur-md">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold text-white">Buy RELIEF Tokens</h2>
-          <button
-            onClick={onClose}
-            className="text-white/60 hover:text-white transition"
-          >
-            ✕
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          {/* Token Amount Input */}
-          <div>
-            <label className="text-white/80 text-sm mb-2 block">
-              Number of RELIEF Tokens
-            </label>
-            <input
-              type="number"
-              value={tokenAmount}
-              onChange={(e) => setTokenAmount(e.target.value)}
-              placeholder="Enter amount"
-              className="w-full bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-green-500"
-              disabled={isProcessing}
-            />
-          </div>
-
-          {/* POL Amount Display */}
-          <div className="glass-card bg-white/5 border border-white/10 rounded-xl p-4">
-            <div className="flex justify-between items-center">
-              <span className="text-white/60 text-sm">POL Required:</span>
-              <span className="text-white font-semibold text-lg">{polAmount} POL</span>
-            </div>
-            <p className="text-white/40 text-xs mt-2">Exchange Rate: 1 POL = 1 RELIEF</p>
-          </div>
-
-          {/* Transaction Status */}
-          {txStatus && (
-            <div className={`glass-card border rounded-xl p-4 ${
-              txStatus.includes('Error') ? 'bg-red-500/10 border-red-500/20' : 
-              txStatus.includes('Success') ? 'bg-green-500/10 border-green-500/20' : 
-              'bg-white/5 border-white/10'
-            }`}>
-              <p className={`text-sm ${
-                txStatus.includes('Error') ? 'text-red-400' : 
-                txStatus.includes('Success') ? 'text-green-400' : 
-                'text-white/80'
-              }`}>
-                {txStatus}
-              </p>
-              {txHash && (
-                <a
-                  href={polygonService.getPolygonScanUrl(txHash, 'tx')}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-green-400 hover:text-green-300 text-xs mt-2 inline-block"
-                >
-                  View on PolygonScan →
-                </a>
-              )}
-            </div>
-          )}
-
-          {/* Buy Button */}
-          <button
-            onClick={handleBuyTokens}
-            disabled={isProcessing || !tokenAmount || parseFloat(tokenAmount) <= 0}
-            className="w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-3 rounded-xl font-semibold hover:shadow-lg hover:shadow-green-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isProcessing ? 'Processing...' : 'Buy Tokens'}
-          </button>
-
-          {txStatus.includes('Success') && txHash && (
-            <div className="glass-card bg-green-500/10 border border-green-500/20 rounded-xl p-4">
-              <h3 className="text-green-400 font-semibold mb-2">Payment Receipt</h3>
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-white/60">Tokens Purchased:</span>
-                  <span className="text-white font-semibold">{tokenAmount} RELIEF</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/60">POL Paid:</span>
-                  <span className="text-white font-semibold">{polAmount} POL</span>
-                </div>
-                <div className="mt-2 pt-2 border-t border-green-500/20">
-                  <p className="text-white/60 text-xs">Transaction Hash:</p>
-                  <a
-                    href={polygonService.getPolygonScanUrl(txHash, 'tx')}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-green-400 hover:text-green-300 text-xs font-mono break-all"
-                  >
-                    {txHash}
-                  </a>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      {/* Donate Modal */}
+      {donateModalOpen && selectedCampaign && (
+        <DonateModal 
+          campaign={selectedCampaign} 
+          onClose={() => {
+            setDonateModalOpen(false);
+            setSelectedCampaign(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -646,67 +565,39 @@ function DonateModal({ campaign, onClose }) {
   const [balance, setBalance] = useState('0');
   const [txStatus, setTxStatus] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [campaignTokenAddress, setCampaignTokenAddress] = useState(null);
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
 
   useEffect(() => {
-    loadCampaignToken();
     loadBalance();
   }, [address, campaign]);
 
-  // Get the token address from the campaign contract
-  const loadCampaignToken = async () => {
-    try {
-      if (!campaign.blockchainAddress) return;
-      
-      const { getPublicClient } = await import('@wagmi/core');
-      const { config } = await import('../../config/wagmiConfig');
-      const CampaignABI = (await import('../../contracts/Campaign.json')).default.abi;
-      
-      const client = getPublicClient(config, { chainId: 80002 });
-      const tokenAddr = await client.readContract({
-        address: campaign.blockchainAddress,
-        abi: CampaignABI,
-        functionName: 'reliefToken',
-      });
-      console.log('🪙 Campaign uses token:', tokenAddr);
-      setCampaignTokenAddress(tokenAddr);
-    } catch (error) {
-      console.error('Error loading campaign token:', error);
-      // Fallback to global token
-      setCampaignTokenAddress(polygonService.CONTRACTS.reliefToken);
-    }
-  };
-
+  // Load USDC balance using direct eth_call
   const loadBalance = async () => {
     try {
       if (!address) return;
-      const { getPublicClient } = await import('@wagmi/core');
-      const { config } = await import('../../config/wagmiConfig');
       
-      // Use campaign's token address or fallback to global
-      const tokenToCheck = campaignTokenAddress || polygonService.CONTRACTS.reliefToken;
+      const USDC_ADDRESS = '0x8B0180f2101c8260d49339abfEe87927412494B4'; // User's actual USDC contract
       
-      const client = getPublicClient(config, { chainId: 80002 });
-      const bal = await client.readContract({
-        address: tokenToCheck,
-        abi: (await import('../../contracts/ReliefToken.json')).default.abi,
-        functionName: 'balanceOf',
-        args: [address],
-      });
-      setBalance(formatEther(bal));
+      if (typeof window.ethereum !== 'undefined') {
+        // balanceOf(address) function selector = 0x70a08231
+        const data = '0x70a08231' + address.slice(2).padStart(64, '0');
+        
+        const result = await window.ethereum.request({
+          method: 'eth_call',
+          params: [{
+            to: USDC_ADDRESS,
+            data: data
+          }, 'latest']
+        });
+        
+        const balanceRaw = parseInt(result, 16);
+        setBalance((balanceRaw / 1e6).toFixed(2)); // USDC has 6 decimals
+      }
     } catch (error) {
-      console.error('Error loading balance:', error);
+      console.error('Error loading USDC balance:', error);
     }
   };
-
-  // Reload balance when campaign token is loaded
-  useEffect(() => {
-    if (campaignTokenAddress && address) {
-      loadBalance();
-    }
-  }, [campaignTokenAddress, address]);
 
   const handleDonate = async () => {
     try {
@@ -725,133 +616,123 @@ function DonateModal({ campaign, onClose }) {
         return;
       }
 
-      if (!campaignTokenAddress) {
-        alert('Loading campaign token... Please try again.');
-        return;
-      }
-
       setIsProcessing(true);
       setTxStatus('Preparing transaction...');
 
-      const amountInWei = parseEther(amount);
-      
-      // Use the campaign's token address
-      const tokenToUse = campaignTokenAddress;
+      // USDC has 6 decimals
+      const amountInDecimals = parseUnits(amount, 6);
       
       console.log('=== Donation Details ===');
       console.log('Donor address:', address);
       console.log('Campaign blockchain address:', campaign.blockchainAddress);
-      console.log('Amount:', amount, 'RELIEF');
-      console.log('Amount in Wei:', amountInWei.toString());
-      console.log('🪙 Campaign Token address:', tokenToUse);
-      console.log('Donor balance:', balance, 'RELIEF');
+      console.log('Amount:', amount, 'USDC');
+      console.log('Amount in decimals:', amountInDecimals.toString());
+      console.log('Donor USDC balance:', balance);
 
       // Check balance
       if (parseFloat(amount) > parseFloat(balance)) {
-        throw new Error('Insufficient RELIEF token balance');
+        throw new Error('Insufficient USDC balance');
       }
 
       // Get contract ABIs
-      const ReliefTokenABI = (await import('../../contracts/ReliefToken.json')).default.abi;
+      const USDC_ABI = [
+        {
+          "constant": false,
+          "inputs": [
+            {"name": "_spender", "type": "address"},
+            {"name": "_value", "type": "uint256"}
+          ],
+          "name": "approve",
+          "outputs": [{"name": "", "type": "bool"}],
+          "type": "function"
+        },
+        {
+          "constant": true,
+          "inputs": [
+            {"name": "_owner", "type": "address"},
+            {"name": "_spender", "type": "address"}
+          ],
+          "name": "allowance",
+          "outputs": [{"name": "", "type": "uint256"}],
+          "type": "function"
+        },
+        {
+          "constant": true,
+          "inputs": [{"name": "_owner", "type": "address"}],
+          "name": "balanceOf",
+          "outputs": [{"name": "balance", "type": "uint256"}],
+          "type": "function"
+        }
+      ];
       const CampaignABI = (await import('../../contracts/Campaign.json')).default.abi;
       const { getPublicClient } = await import('@wagmi/core');
       const { config } = await import('../../config/wagmiConfig');
       const client = getPublicClient(config, { chainId: 80002 });
 
-      // Check allowance using campaign's token
-      setTxStatus('Checking token allowance...');
+      // Check allowance for USDC
+      setTxStatus('Checking USDC allowance...');
       const currentAllowance = await client.readContract({
-        address: tokenToUse,
-        abi: ReliefTokenABI,
+        address: polygonService.CONTRACTS.usdc,
+        abi: USDC_ABI,
         functionName: 'allowance',
         args: [address, campaign.blockchainAddress],
       });
 
       // Approve if needed
-      if (currentAllowance < amountInWei) {
-        setTxStatus('Estimating gas for approval...');
-        
-        // Try to estimate gas first to get better error messages
-        try {
-          const gasEstimate = await client.estimateContractGas({
-            address: tokenToUse,
-            abi: ReliefTokenABI,
-            functionName: 'approve',
-            args: [campaign.blockchainAddress, amountInWei],
-            account: address,
-          });
-          console.log('Approval gas estimate:', gasEstimate);
-        } catch (estimateError) {
-          console.error('❌ Approval gas estimation failed!');
-          console.error('Estimate error:', estimateError);
-          if (estimateError.shortMessage) {
-            console.error('Short message:', estimateError.shortMessage);
-          }
-          if (estimateError.details) {
-            console.error('Details:', estimateError.details);
-          }
-          throw new Error('Approval would fail: ' + (estimateError.shortMessage || estimateError.message));
-        }
-        
-        setTxStatus('Please approve RELIEF tokens in MetaMask...');
+      if (currentAllowance < amountInDecimals) {
+        setTxStatus('Please approve USDC in MetaMask...');
         const approveTxHash = await walletClient.writeContract({
-          address: tokenToUse,
-          abi: ReliefTokenABI,
+          address: polygonService.CONTRACTS.usdc,
+          abi: USDC_ABI,
           functionName: 'approve',
-          args: [campaign.blockchainAddress, amountInWei],
+          args: [campaign.blockchainAddress, amountInDecimals],
           account: address,
         });
         
         console.log('✅ Approval tx sent:', approveTxHash);
-        setTxStatus('Waiting for approval confirmation (2 blocks)...');
+        setTxStatus('Waiting for approval confirmation...');
         
-        // Wait for 2 block confirmations
-        const approveReceipt = await client.waitForTransactionReceipt({ 
+        await client.waitForTransactionReceipt({ 
           hash: approveTxHash,
           confirmations: 2,
-          timeout: 60_000 // 60 seconds
+          timeout: 60_000
         });
         
-        console.log('✅ Approval confirmed at block:', approveReceipt.blockNumber);
-        
-        // Verify allowance was actually updated
-        const newAllowance = await client.readContract({
-          address: tokenToUse,
-          abi: ReliefTokenABI,
-          functionName: 'allowance',
-          args: [address, campaign.blockchainAddress],
-        });
-        
-        console.log('✅ New allowance verified:', formatEther(newAllowance), 'RELIEF');
-        
-        if (newAllowance < amountInWei) {
-          throw new Error('Approval failed: Allowance not updated on-chain');
-        }
+        console.log('✅ Approval confirmed! Proceeding to donation...');
         
         // Wait for network to sync
-        setTxStatus('Syncing with network...');
+        setTxStatus('✅ Approval confirmed! Now processing donation...');
         await new Promise(resolve => setTimeout(resolve, 3000));
+      } else {
+        console.log('ℹ️ Already approved, proceeding directly to donation');
+        setTxStatus('USDC already approved, processing donation...');
       }
 
       // Donate
-      setTxStatus('Please confirm donation in MetaMask...');
-      const donateTxHash = await walletClient.writeContract({
-        address: campaign.blockchainAddress,
-        abi: CampaignABI,
-        functionName: 'donate',
-        args: [amountInWei],
-      });
+      console.log('🎁 Starting donation transaction...');
+      console.log('Campaign address:', campaign.blockchainAddress);
+      console.log('Amount:', amountInDecimals.toString());
+      
+      setTxStatus('⚠️ IMPORTANT: Confirm the DONATION in MetaMask (2nd popup)...');
+      
+      try {
+        const donateTxHash = await walletClient.writeContract({
+          address: campaign.blockchainAddress,
+          abi: CampaignABI,
+          functionName: 'donate',
+          args: [amountInDecimals],
+        });
 
-      console.log('✅ Donation tx sent:', donateTxHash);
-      setTxStatus('Waiting for donation confirmation (2 blocks)...');
-      
-      const receipt = await client.waitForTransactionReceipt({ 
-        hash: donateTxHash,
-        confirmations: 2,
-        timeout: 60_000 // 60 seconds
-      });
-      
-      console.log('✅ Donation confirmed at block:', receipt.blockNumber);
+        console.log('✅ Donation tx sent:', donateTxHash);
+        setTxStatus('Waiting for donation confirmation...');
+        
+        const receipt = await client.waitForTransactionReceipt({ 
+          hash: donateTxHash,
+          confirmations: 2,
+          timeout: 60_000
+        });
+        
+        console.log('✅ Donation confirmed at block:', receipt.blockNumber);
 
       // Update Firebase
       setTxStatus('Updating database...');
@@ -868,6 +749,7 @@ function DonateModal({ campaign, onClose }) {
         campaignTitle: campaign.title,
         donorId: address.toLowerCase(),
         amount: parseFloat(amount),
+        currency: 'USDC',
         txHash: donateTxHash,
         blockNumber: receipt.blockNumber.toString(),
         network: 'polygon-amoy',
@@ -876,13 +758,26 @@ function DonateModal({ campaign, onClose }) {
       });
 
       // Success
-      alert(`Successfully donated ${amount} RELIEF tokens!\n\nTransaction: ${donateTxHash}\n\nView on PolygonScan: ${polygonService.getPolygonScanUrl(donateTxHash)}`);
+      setTxStatus('✅ Donation successful! Updating balance...');
+      
+      // Reload balance immediately
+      await loadBalance();
+      
+      alert(`Successfully donated $${amount} USDC!\n\nTransaction: ${donateTxHash}\n\nView on PolygonScan: ${polygonService.getPolygonScanUrl(donateTxHash)}`);
+      
+      // Trigger parent component to reload USDC balance
+      window.dispatchEvent(new Event('reloadUSDCBalance'));
       
       onClose();
+      } catch (donationError) {
+        console.error('❌ DONATION TRANSACTION FAILED:', donationError);
+        throw new Error(`Donation failed: ${donationError.message || 'User rejected or transaction failed'}`);
+      }
+      
     } catch (error) {
-      console.error('Donation error:', error);
-      const errorMsg = polygonService.parseContractError(error);
-      alert(`Donation failed: ${errorMsg}`);
+      console.error('❌ Transaction error:', error);
+      const errorMsg = error.message || polygonService.parseContractError(error);
+      alert(`Transaction failed: ${errorMsg}\n\nCheck console for details.`);
     } finally {
       setIsProcessing(false);
       setTxStatus('');
@@ -925,22 +820,22 @@ function DonateModal({ campaign, onClose }) {
           </div>
 
           <div className="flex justify-between text-sm">
-            <span className="text-white/60">Raised: <strong className="text-white">{campaign.raised || 0} RELIEF</strong></span>
-            <span className="text-white/60">Goal: <strong className="text-white">{campaign.goal} RELIEF</strong></span>
+            <span className="text-white/60">Raised: <strong className="text-white">${campaign.raised || 0} USDC</strong></span>
+            <span className="text-white/60">Goal: <strong className="text-white">${campaign.goal} USDC</strong></span>
           </div>
         </div>
 
         {/* Balance */}
         <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
           <p className="text-sm text-green-400">
-            Your Balance: <strong>{parseFloat(balance).toFixed(2)} RELIEF</strong>
+            Your USDC Balance: <strong>${parseFloat(balance).toFixed(2)}</strong>
           </p>
         </div>
 
         {/* Amount Input */}
         <div className="mb-4">
           <label className="block text-white font-medium mb-2">
-            Donation Amount (RELIEF Tokens)
+            Donation Amount (USDC)
           </label>
           <input
             type="number"
@@ -979,12 +874,275 @@ function DonateModal({ campaign, onClose }) {
               Processing...
             </span>
           ) : (
-            '💝 Donate RELIEF Tokens'
+            '💝 Donate USDC'
           )}
         </button>
 
         <p className="text-xs text-white/40 mt-3 text-center">
           Transactions are processed on Polygon Amoy testnet
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Buy USDC Modal Component
+function BuyUsdcModal({ onClose, onSuccess }) {
+  const [polAmount, setPolAmount] = useState('');
+  const [usdcAmount, setUsdcAmount] = useState('0');
+  const [polBalance, setPolBalance] = useState('0');
+  const [exchangeRate, setExchangeRate] = useState('0');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [txStatus, setTxStatus] = useState('');
+  const { address } = useAccount();
+  const { data: walletClient } = useWalletClient();
+
+  useEffect(() => {
+    loadPolBalance();
+    loadExchangeRate();
+    
+    // Auto-refresh exchange rate every 30 seconds
+    const rateInterval = setInterval(() => {
+      loadExchangeRate();
+    }, 30000);
+    
+    return () => clearInterval(rateInterval);
+  }, [address]);
+
+  useEffect(() => {
+    if (polAmount && parseFloat(polAmount) > 0 && parseFloat(exchangeRate) > 0) {
+      const usdc = (parseFloat(polAmount) * parseFloat(exchangeRate)).toFixed(2);
+      setUsdcAmount(usdc);
+    } else {
+      setUsdcAmount('0');
+    }
+  }, [polAmount, exchangeRate]);
+
+  const loadPolBalance = async () => {
+    try {
+      if (!address || typeof window.ethereum === 'undefined') return;
+      
+      const balance = await window.ethereum.request({
+        method: 'eth_getBalance',
+        params: [address, 'latest']
+      });
+      
+      const balanceInPOL = (parseInt(balance, 16) / 1e18).toFixed(4);
+      setPolBalance(balanceInPOL);
+    } catch (error) {
+      console.error('Error loading POL balance:', error);
+    }
+  };
+
+  const loadExchangeRate = async () => {
+    try {
+      console.log('🔄 Fetching real-time POL to USDC exchange rate...');
+      
+      // Fetch real-time POL price from CoinGecko API (polygon is the correct ID)
+      const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=polygon&vs_currencies=usd', {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data && data.polygon && data.polygon.usd) {
+        const polPriceInUSD = data.polygon.usd;
+        console.log('✅ Real-time POL price:', polPriceInUSD, 'USD');
+        console.log('💵 Exchange rate: 1 POL =', polPriceInUSD, 'USDC');
+        setExchangeRate(polPriceInUSD.toString());
+      } else {
+        throw new Error('Invalid response format from CoinGecko');
+      }
+    } catch (error) {
+      console.error('❌ Error loading exchange rate:', error.message);
+      // Fallback to current approximate rate if API fails
+      setExchangeRate('0.16');
+      console.log('⚠️ Using fallback rate: 0.16 USD per POL');
+    }
+  };
+
+  const handleBuyUsdc = async () => {
+    try {
+      if (!polAmount || parseFloat(polAmount) <= 0) {
+        alert('Please enter a valid POL amount');
+        return;
+      }
+
+      if (parseFloat(polAmount) > parseFloat(polBalance)) {
+        alert('Insufficient POL balance');
+        return;
+      }
+
+      if (!walletClient) {
+        alert('Please connect your wallet');
+        return;
+      }
+
+      setIsProcessing(true);
+      setTxStatus('Preparing swap...');
+
+      const polAmountInWei = parseEther(polAmount);
+      
+      console.log('=== Swap Details ===');
+      console.log('POL Amount:', polAmount);
+      console.log('Expected USDC:', usdcAmount);
+      console.log('Exchange Rate:', exchangeRate, 'USDC per POL');
+
+      // Get swap contract address
+      const swapContractAddress = polygonService.CONTRACTS.testnetUsdcSwap;
+      console.log('Swap Contract:', swapContractAddress);
+
+      if (!swapContractAddress) {
+        throw new Error('Swap contract address not configured. Please check addresses.json');
+      }
+
+      setTxStatus('Please confirm swap in MetaMask...');
+
+      // Call swapPOLforUSDC function on the TestnetUSDCSwap contract
+      // The contract receives POL and sends USDC back to the user
+      const SWAP_ABI = [{
+        "inputs": [],
+        "name": "swapPOLforUSDC",
+        "outputs": [],
+        "stateMutability": "payable",
+        "type": "function"
+      }];
+
+      const txHash = await walletClient.writeContract({
+        address: swapContractAddress,
+        abi: SWAP_ABI,
+        functionName: 'swapPOLforUSDC',
+        value: polAmountInWei,
+        account: address,
+      });
+
+      console.log('✅ Swap tx sent:', txHash);
+      setTxStatus('Waiting for confirmation...');
+
+      const { getPublicClient } = await import('@wagmi/core');
+      const { config } = await import('../../config/wagmiConfig');
+      const client = getPublicClient(config, { chainId: 80002 });
+
+      const receipt = await client.waitForTransactionReceipt({
+        hash: txHash,
+        confirmations: 2,
+        timeout: 60_000
+      });
+
+      console.log('✅ Swap confirmed at block:', receipt.blockNumber);
+
+      alert(`✅ Successfully bought ${usdcAmount} USDC with ${polAmount} POL!\\n\\nTransaction: ${txHash}\\n\\nView on PolygonScan: ${polygonService.getPolygonScanUrl(txHash)}`);
+
+      // Reload USDC balance
+      if (onSuccess) {
+        setTimeout(() => onSuccess(), 2000);
+      }
+
+      onClose();
+    } catch (error) {
+      console.error('Swap error:', error);
+      const errorMsg = error.message || 'Transaction failed';
+      alert(`Swap failed: ${errorMsg}`);
+    } finally {
+      setIsProcessing(false);
+      setTxStatus('');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 border border-white/20 rounded-3xl p-6 max-w-md w-full shadow-2xl">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold text-white">💰 Buy USDC with POL</h2>
+          <button
+            onClick={onClose}
+            disabled={isProcessing}
+            className="text-white/60 hover:text-white text-2xl"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* POL Balance */}
+        <div className="mb-4 p-3 bg-purple-500/10 border border-purple-500/20 rounded-lg">
+          <p className="text-sm text-purple-400">
+            Your POL Balance: <strong>{parseFloat(polBalance).toFixed(4)} POL</strong>
+          </p>
+        </div>
+
+        {/* Exchange Rate */}
+        <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-blue-400">
+              Exchange Rate: <strong>1 POL = ${exchangeRate} USDC</strong>
+            </p>
+            <span className="text-xs text-blue-400/60">🔄 Live</span>
+          </div>
+          <p className="text-xs text-blue-400/60 mt-1">Updates every 30 seconds</p>
+        </div>
+
+        {/* POL Amount Input */}
+        <div className="mb-4">
+          <label className="block text-white font-medium mb-2">
+            Amount to Spend (POL)
+          </label>
+          <input
+            type="number"
+            value={polAmount}
+            onChange={(e) => setPolAmount(e.target.value)}
+            disabled={isProcessing}
+            placeholder="Enter POL amount"
+            min="0"
+            step="0.01"
+            className="w-full px-4 py-2 bg-white/5 border border-white/20 rounded-lg text-white placeholder-white/40 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+          />
+        </div>
+
+        {/* USDC You'll Receive */}
+        <div className="mb-4 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+          <p className="text-sm text-green-400 mb-1">You will receive:</p>
+          <p className="text-2xl text-green-400 font-bold">${usdcAmount} USDC</p>
+        </div>
+
+        {/* Transaction Status */}
+        {txStatus && (
+          <div className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+            <div className="flex items-center">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-400 mr-2"></div>
+              <p className="text-sm text-yellow-400">{txStatus}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Buy Button */}
+        <button
+          onClick={handleBuyUsdc}
+          disabled={isProcessing || !polAmount || parseFloat(polAmount) <= 0}
+          className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 text-white py-3 rounded-2xl font-semibold hover:shadow-lg hover:shadow-blue-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isProcessing ? (
+            <span className="flex items-center justify-center">
+              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Processing...
+            </span>
+          ) : (
+            '💳 Buy USDC'
+          )}
+        </button>
+
+        <p className="text-xs text-white/40 mt-3 text-center">
+          Swap powered by POLtoUSDC contract on Polygon Amoy<br/>
+          <span className="text-yellow-400/60">Note: MetaMask may show "ETH" but you're paying with POL on Polygon</span>
         </p>
       </div>
     </div>
