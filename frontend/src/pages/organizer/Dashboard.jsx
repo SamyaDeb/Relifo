@@ -4,7 +4,7 @@ import { db } from '../../firebase/config';
 import { collection, addDoc, doc, updateDoc, query, where, onSnapshot, getDoc, getDocs } from 'firebase/firestore';
 import { USER_STATUS } from '../../firebase/constants';
 import { useAccount, useWalletClient, usePublicClient, useDisconnect } from 'wagmi';
-import { parseEther, encodeFunctionData, formatEther } from 'viem';
+import { parseUnits, encodeFunctionData, formatUnits, formatEther } from 'viem';
 import { getCampaignFactoryContract, parseContractError, getPolygonScanUrl, CONTRACTS } from '../../services/polygonService';
 import { getPublicClient, getWalletClient } from '@wagmi/core';
 import { config, customPolygonAmoy } from '../../config/wagmiConfig';
@@ -208,7 +208,7 @@ export default function OrganizerDashboard() {
             description: userData.description || '',
             walletContract: wallet,
             hasWallet: hasWallet,
-            allocatedAmount: hasWallet ? formatEther(allocation) : '0',
+            allocatedAmount: hasWallet ? formatUnits(allocation, 6) : '0', // USDC uses 6 decimals
             isApprovedOnChain: true, // Always true because we filtered above
           });
         }
@@ -769,11 +769,11 @@ function CampaignCard({ campaign, approvedBeneficiaries = [], onAllocateFunds })
         <div className="grid grid-cols-3 gap-4 pt-2">
           <div>
             <p className="text-sm text-white/70">Raised</p>
-            <p className="text-lg font-bold text-white">{(campaign.raised || 0).toLocaleString()} RELIEF</p>
+            <p className="text-lg font-bold text-white">${(campaign.raised || 0).toLocaleString()} USDC</p>
           </div>
           <div>
             <p className="text-sm text-white/70">Goal</p>
-            <p className="text-lg font-bold text-white">{campaign.goal.toLocaleString()} RELIEF</p>
+            <p className="text-lg font-bold text-white">${campaign.goal.toLocaleString()} USDC</p>
           </div>
           <div>
             <p className="text-sm text-white/70">Available Beneficiaries</p>
@@ -1006,15 +1006,15 @@ If you're connected with the wrong wallet:
       // Get CampaignFactory contract
       const campaignFactory = getCampaignFactoryContract(walletClient);
       
-      // Convert goal to wei (assuming goal is in USD, we'll use it as RELIEF tokens 1:1)
-      const goalInWei = parseEther(formData.goal.toString());
+      // Convert goal amount to USDC decimals (6 decimals, not 18!)
+      const goalInDecimals = parseUnits(formData.goal.toString(), 6);
       
       console.log('Creating campaign with params:');
       console.log('- CampaignFactory address:', CONTRACTS.campaignFactory);
       console.log('- Title:', formData.title);
       console.log('- Description:', formData.description);
-      console.log('- Goal (RELIEF):', formData.goal);
-      console.log('- Goal (Wei):', goalInWei.toString());
+      console.log('- Goal (USDC):', formData.goal);
+      console.log('- Goal (6 decimals):', goalInDecimals.toString());
       console.log('- Location:', formData.location);
       console.log('- Disaster Type:', formData.disasterType);
       console.log('- Sender address:', address);
@@ -1028,7 +1028,7 @@ If you're connected with the wrong wallet:
       console.log('📋 Final parameters check:');
       console.log('  Title:', formData.title, '(type:', typeof formData.title, ', length:', formData.title.length, ')');
       console.log('  Description:', formData.description, '(type:', typeof formData.description, ', length:', formData.description.length, ')');
-      console.log('  Goal Wei:', goalInWei.toString());
+      console.log('  Goal (decimals):', goalInDecimals.toString());
       console.log('  Location:', formData.location, '(type:', typeof formData.location, ', length:', formData.location.length, ')');
       console.log('  Disaster Type:', formData.disasterType, '(type:', typeof formData.disasterType, ', length:', formData.disasterType.length, ')');
       console.log('  Account:', address);
@@ -1048,7 +1048,7 @@ If you're connected with the wrong wallet:
             args: [
               formData.title,
               formData.description,
-              goalInWei,
+              goalInDecimals,
               formData.location,
               formData.disasterType
             ],
@@ -1084,7 +1084,7 @@ If you're connected with the wrong wallet:
           args: [
             formData.title,
             formData.description,
-            goalInWei,
+            goalInDecimals,
             formData.location,
             formData.disasterType
           ]
@@ -1100,7 +1100,7 @@ If you're connected with the wrong wallet:
             args: [
               formData.title,
               formData.description,
-              goalInWei,
+              goalInDecimals,
               formData.location,
               formData.disasterType
             ],
@@ -1474,7 +1474,7 @@ function ApprovedBeneficiaryCard({ beneficiary, campaign, onAllocateFunds }) {
             </span>
             {beneficiary.hasWallet ? (
               <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                💰 {beneficiary.allocatedAmount || '0'} RELIEF ALLOCATED
+                💰 ${beneficiary.allocatedAmount || '0'} USDC ALLOCATED
               </span>
             ) : (
               <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
@@ -1518,7 +1518,7 @@ function ApprovedBeneficiaryCard({ beneficiary, campaign, onAllocateFunds }) {
             <span className="text-xs font-semibold text-green-300 uppercase block mb-1">Beneficiary Wallet Contract</span>
             <p className="text-green-400 font-mono text-sm break-all">{beneficiary.walletContract}</p>
             <p className="text-green-300 text-sm mt-2">
-              <strong>Allocated:</strong> {beneficiary.allocatedAmount} RELIEF tokens
+              <strong>Allocated:</strong> ${beneficiary.allocatedAmount} USDC
             </p>
           </div>
         )}
@@ -1571,7 +1571,7 @@ function BeneficiaryCard({ beneficiary, campaign, onApprove, onReject, showActio
             )}
             {beneficiary.hasWallet && (
               <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                💰 {beneficiary.allocatedAmount || '0'} RELIEF
+                💰 {beneficiary.allocatedAmount || '0'} USDC
               </span>
             )}
           </div>

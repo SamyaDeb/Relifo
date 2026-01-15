@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useWalletClient, useAccount } from 'wagmi';
-import { parseEther, formatEther } from 'viem';
+import { parseUnits, formatUnits } from 'viem';
 import polygonService, { getPolygonScanUrl } from '../services/polygonService';
 import { doc, updateDoc, addDoc, collection, getDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
@@ -66,16 +66,16 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
       });
       
       console.log('Campaign info:', campaignInfoData);
-      console.log('📊 Campaign raisedAmount (on-chain):', formatEther(campaignInfoData[3]), 'RELIEF');
-      console.log('💰 Actual token balance of campaign:', formatEther(tokenBalance), 'RELIEF');
-      console.log('📤 Total allocated:', formatEther(totalAllocated), 'RELIEF');
+      console.log('📊 Campaign raisedAmount (on-chain):', formatUnits(campaignInfoData[3], 6), 'USDC');
+      console.log('💰 Actual token balance of campaign:', formatUnits(tokenBalance, 6), 'USDC');
+      console.log('📤 Total allocated:', formatUnits(totalAllocated, 6), 'USDC');
       
       // campaignInfo returns a struct, raisedAmount is at index 3
       const raisedAmount = campaignInfoData[3];
       const availableBalance = raisedAmount - totalAllocated;
-      const balance = formatEther(availableBalance);
+      const balance = formatUnits(availableBalance, 6);
       
-      console.log('✅ Available for allocation:', balance, 'RELIEF');
+      console.log('✅ Available for allocation:', balance, 'USDC');
       setCampaignBalance(balance);
     } catch (error) {
       console.error('Error loading campaign balance:', error);
@@ -106,7 +106,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
       }
 
       if (parseFloat(amount) > parseFloat(campaignBalance)) {
-        alert(`Insufficient funds in campaign.\n\nAvailable: ${campaignBalance} RELIEF\nRequested: ${amount} RELIEF`);
+        alert(`Insufficient funds in campaign.\n\nAvailable: $${campaignBalance} USDC\nRequested: $${amount} USDC`);
         return;
       }
 
@@ -219,7 +219,8 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
 
       setTxStatus('Preparing allocation...');
 
-      const amountInWei = parseEther(amount);
+      // USDC uses 6 decimals
+      const amountInWei = parseUnits(amount, 6);
       const beneficiary = beneficiaries.find(b => b.id === selectedBeneficiary);
       
       if (!beneficiary) {
@@ -261,10 +262,10 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
         const raisedAmount = campaignInfo[3];
         
         console.log('📊 Pre-allocation check:', {
-          raisedAmount: formatEther(raisedAmount),
-          totalAllocated: formatEther(totalAllocated),
-          requestedAmount: formatEther(amountInWei),
-          wouldBeTotal: formatEther(totalAllocated + amountInWei),
+          raisedAmount: formatUnits(raisedAmount, 6),
+          totalAllocated: formatUnits(totalAllocated, 6),
+          requestedAmount: formatUnits(amountInWei, 6),
+          wouldBeTotal: formatUnits(totalAllocated + amountInWei, 6),
           hasEnough: raisedAmount >= (totalAllocated + amountInWei)
         });
         
@@ -290,7 +291,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
           let errorMessage = 'Unknown error';
           if (gasError.message) {
             if (gasError.message.includes('Insufficient campaign balance')) {
-              errorMessage = `Campaign doesn't have enough funds.\n\nAvailable: ${formatEther(raisedAmount - totalAllocated)} RELIEF\nRequested: ${amount} RELIEF`;
+              errorMessage = `Campaign doesn't have enough funds.\n\nAvailable: $${formatUnits(raisedAmount - totalAllocated, 6)} USDC\nRequested: $${amount} USDC`;
             } else if (gasError.message.includes('Invalid beneficiary')) {
               errorMessage = 'Invalid beneficiary address';
             } else if (gasError.shortMessage) {
@@ -534,7 +535,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
       }
       
       // Show success message
-      alert(`✅ Funds Allocated Successfully!\n\nAmount: ${amount} RELIEF\nBeneficiary: ${beneficiary.name || beneficiary.email}\n\nTransaction: ${txHash.substring(0, 20)}...\n\nView on PolygonScan:\n${getPolygonScanUrl(txHash, 'tx')}\n\nThe beneficiary can now see and spend these funds.`);
+      alert(`✅ Funds Allocated Successfully!\n\nAmount: $${amount} USDC\nBeneficiary: ${beneficiary.name || beneficiary.email}\n\nTransaction: ${txHash.substring(0, 20)}...\n\nView on PolygonScan:\n${getPolygonScanUrl(txHash, 'tx')}\n\nThe beneficiary can now see and spend these funds.`);
       
       setIsProcessing(false);
       setTxStatus('');
@@ -557,7 +558,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
       } else if (error.message?.includes('insufficient funds')) {
         errorMessage = 'Insufficient POL for gas fee. Please add POL to your wallet.';
       } else if (error.message?.includes('Insufficient campaign balance')) {
-        errorMessage = `Campaign has insufficient funds.\n\nAvailable: ${campaignBalance} RELIEF\nRequested: ${amount} RELIEF`;
+        errorMessage = `Campaign has insufficient funds.\n\nAvailable: $${campaignBalance} USDC\nRequested: $${amount} USDC`;
       } else if (error.message?.includes('reverted')) {
         errorMessage = `Transaction reverted on blockchain.\n\nPossible reasons:\n• Campaign has insufficient funds\n• Beneficiary not approved\n• Contract paused\n\nPlease check and try again.`;
       } else if (error.message) {
@@ -586,7 +587,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
         <div className="mb-6 p-4 bg-blue-50 rounded-lg">
           <h3 className="font-semibold text-gray-900 mb-2">{campaign.title}</h3>
           <p className="text-sm text-blue-800">
-            Available: <strong>{parseFloat(campaignBalance).toFixed(2)} RELIEF</strong>
+            Available: <strong>${parseFloat(campaignBalance).toFixed(2)} USDC</strong>
           </p>
         </div>
 
@@ -616,7 +617,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
         {/* Amount Input */}
         <div className="mb-4">
           <label className="block text-gray-700 font-medium mb-2">
-            Allocation Amount (RELIEF Tokens)
+            Allocation Amount (USDC)
           </label>
           <input
             type="number"
