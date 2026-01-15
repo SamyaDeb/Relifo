@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../../firebase/config';
 import { collection, query, where, onSnapshot, addDoc, doc, getDoc } from 'firebase/firestore';
 import { useAccount, useWalletClient, useDisconnect } from 'wagmi';
-import { formatEther, parseEther } from 'viem';
+import { formatEther, parseEther, formatUnits, parseUnits } from 'viem';
 import { getPublicClient } from '@wagmi/core';
 import { config } from '../../config/wagmiConfig';
-import ReliefTokenABI from '../../contracts/ReliefToken.json';
+import USDCABI from '../../contracts/USDC.json';
 import BeneficiaryWalletABI from '../../contracts/BeneficiaryWallet.json';
 import CampaignABI from '../../contracts/Campaign.json';
 import CampaignFactoryABI from '../../contracts/CampaignFactory.json';
@@ -58,25 +58,25 @@ export default function BeneficiaryDashboard() {
       if (walletAddress && walletAddress !== '0x0000000000000000000000000000000000000000') {
         setContractWalletAddress(walletAddress);
         
-        // Get the token address from the campaign (important: campaign may use different token)
+        // Get the token address from the campaign (USDC, but contract calls it reliefToken)
         const tokenAddr = await publicClient.readContract({
           address: campaignAddress,
           abi: CampaignABI.abi,
           functionName: 'reliefToken',
         });
-        console.log('🪙 Campaign token address:', tokenAddr);
+        console.log('🪙 Campaign token address (USDC):', tokenAddr);
         setCampaignTokenAddress(tokenAddr); // Store token address in state
         
-        // Get wallet balance using the campaign's token (NOT the global CONTRACTS.reliefToken)
+        // Get wallet balance using the campaign's USDC token
         const balance = await publicClient.readContract({
           address: tokenAddr,
-          abi: ReliefTokenABI.abi,
+          abi: USDCABI,
           functionName: 'balanceOf',
           args: [walletAddress],
         });
         
-        const balanceFormatted = formatEther(balance);
-        console.log('💰 Wallet balance from blockchain:', balanceFormatted, 'RELIEF');
+        const balanceFormatted = formatUnits(balance, 6); // USDC has 6 decimals
+        console.log('💰 Wallet balance from blockchain:', balanceFormatted, 'USDC');
         setCurrentBalance(balanceFormatted);
         setAllocatedAmount(balanceFormatted); // Use balance as allocated amount
         
@@ -207,27 +207,27 @@ export default function BeneficiaryDashboard() {
       console.log('💰 Loading balance for wallet:', walletAddress);
       const publicClient = getPublicClient(config);
       
-      // Use campaign's token address, fallback to global CONTRACTS.reliefToken
-      const tokenToUse = campaignTokenAddress || CONTRACTS.reliefToken;
+      // Use campaign's token address, fallback to global CONTRACTS.usdc
+      const tokenToUse = campaignTokenAddress || CONTRACTS.usdc;
       console.log('🪙 Using token address:', tokenToUse);
       
-      // Get RELIEF token balance of BeneficiaryWallet
+      // Get USDC balance of BeneficiaryWallet
       const balance = await publicClient.readContract({
         address: tokenToUse,
-        abi: ReliefTokenABI.abi,
+        abi: USDCABI,
         functionName: 'balanceOf',
         args: [walletAddress],
       });
       
-      const balanceFormatted = formatEther(balance);
-      console.log('✅ Wallet balance:', balanceFormatted, 'RELIEF');
+      const balanceFormatted = formatUnits(balance, 6); // USDC has 6 decimals
+      console.log('✅ Wallet balance:', balanceFormatted, 'USDC');
       setCurrentBalance(balanceFormatted);
     } catch (error) {
       console.error('━'.repeat(60));
       console.error('❌ ERROR Loading Wallet Balance');
       console.error('━'.repeat(60));
       console.error('Contract Wallet:', contractWalletAddress);
-      console.error('Token Address Used:', campaignTokenAddress || CONTRACTS.reliefToken);
+      console.error('Token Address Used:', campaignTokenAddress || CONTRACTS.usdc);
       console.error('Error:', error.message);
       console.error('');
       console.error('Possible causes:');
@@ -340,25 +340,25 @@ export default function BeneficiaryDashboard() {
     }
 
     try {
-      const amountInWei = parseEther(amount);
+      const amountInUnits = parseUnits(amount, 6); // USDC has 6 decimals
 
       console.log('=== Spending Transaction ===');
       console.log('Beneficiary address:', address);
       console.log('Merchant:', merchant.name);
       console.log('Merchant address:', merchant.address);
-      console.log('Amount:', amount, 'RELIEF');
+      console.log('Amount:', amount, 'USDC');
 
       const publicClient = getPublicClient(config);
-      const tokenToUse = campaignTokenAddress || CONTRACTS.reliefToken;
+      const tokenToUse = campaignTokenAddress || CONTRACTS.usdc;
 
       // Step 1: Estimate gas
       console.log('📊 Estimating gas...');
       try {
         const gasEstimate = await publicClient.estimateContractGas({
           address: tokenToUse,
-          abi: ReliefTokenABI.abi,
+          abi: USDCABI,
           functionName: 'transfer',
-          args: [merchant.address, amountInWei],
+          args: [merchant.address, amountInUnits],
           account: address,
         });
         console.log('✅ Gas estimate:', gasEstimate.toString());
@@ -371,9 +371,9 @@ export default function BeneficiaryDashboard() {
       console.log('💰 Sending spending transaction...');
       const hash = await walletClient.writeContract({
         address: tokenToUse,
-        abi: ReliefTokenABI.abi,
+        abi: USDCABI,
         functionName: 'transfer',
-        args: [merchant.address, amountInWei],
+        args: [merchant.address, amountInUnits],
       });
 
       console.log('✅ Spending tx sent:', hash);
@@ -405,7 +405,7 @@ export default function BeneficiaryDashboard() {
       // Refresh balance
       await loadWalletBalance(contractWalletAddress);
 
-      alert(`✅ Successfully spent ${amount} RELIEF with ${merchant.name}!\n\nTransaction: ${hash}`);
+      alert(`✅ Successfully spent ${amount} USDC with ${merchant.name}!\n\nTransaction: ${hash}`);
 
     } catch (error) {
       console.error('❌ Spending failed:', error.message);
@@ -538,7 +538,7 @@ export default function BeneficiaryDashboard() {
                     <div className="mt-4 p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
                       <p className="text-green-400 font-semibold mb-2">✓ Approved</p>
                       <p className="text-xs text-white/70">
-                        Next step: Organizer will allocate RELIEF tokens to your wallet
+                        Next step: Organizer will allocate USDC to your wallet
                       </p>
                     </div>
                   )}
@@ -566,7 +566,7 @@ export default function BeneficiaryDashboard() {
                     {parseFloat(currentBalance).toFixed(2)}
                   </span>
                 </div>
-                <p className="text-xs text-white/50 text-center">RELIEF Tokens (Live from Blockchain)</p>
+                <p className="text-xs text-white/50 text-center">USDC (Live from Blockchain)</p>
               </div>
 
               {/* Current Balance */}
@@ -637,10 +637,10 @@ export default function BeneficiaryDashboard() {
                 disabled={parseFloat(currentBalance) <= 0}
                 className="w-full group relative flex cursor-pointer items-center justify-center whitespace-nowrap border border-white/10 px-6 py-4 text-white bg-gradient-to-r from-green-500 to-emerald-500 rounded-[100px] transform-gpu transition-transform duration-300 ease-in-out active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span className="relative z-20 text-lg font-semibold">🛒 Spend RELIEF Tokens</span>
+                <span className="relative z-20 text-lg font-semibold">🛒 Spend USDC</span>
               </button>
               <p className="text-xs text-white/50 mt-3 text-center">
-                Current Balance: {parseFloat(currentBalance).toFixed(2)} RELIEF
+                Current Balance: {parseFloat(currentBalance).toFixed(2)} USDC
               </p>
             </div>
 
@@ -661,7 +661,7 @@ export default function BeneficiaryDashboard() {
                           <p className="text-white font-semibold">{tx.merchantName}</p>
                           <p className="text-xs text-white/50">{new Date(tx.createdAt).toLocaleString()}</p>
                         </div>
-                        <span className="text-red-400 font-bold text-lg">-{parseFloat(tx.amount).toFixed(2)} RELIEF</span>
+                        <span className="text-red-400 font-bold text-lg">-{parseFloat(tx.amount).toFixed(2)} USDC</span>
                       </div>
                       <div className="flex items-center justify-between text-xs">
                         <span className="text-white/70">{tx.category}</span>
@@ -793,7 +793,7 @@ function TransactionCard({ transaction }) {
         )}
       </div>
       <div className="text-right">
-        <p className="text-xl font-bold text-purple-600">{transaction.amount} RELIEF</p>
+        <p className="text-xl font-bold text-purple-600">{transaction.amount} USDC</p>
         <p className="text-xs text-green-600">✓ Confirmed</p>
       </div>
     </div>
@@ -878,14 +878,14 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
       }
 
       if (parseFloat(amount) > availableBalance) {
-        alert(`Insufficient balance.\n\nAvailable: ${availableBalance.toFixed(2)} RELIEF\nRequested: ${amount} RELIEF`);
+        alert(`Insufficient balance.\n\nAvailable: ${availableBalance.toFixed(2)} USDC\nRequested: ${amount} USDC`);
         return;
       }
 
       setIsProcessing(true);
       setTxStatus('Checking merchant approval...');
 
-      const amountInWei = parseEther(amount);
+      const amountInUnits = parseUnits(amount, 6); // USDC has 6 decimals
       const publicClient = getPublicClient(config);
       const merchantAddress = selectedMerchant.walletAddress || selectedMerchant.id;
       const merchantName = selectedMerchant.businessName || selectedMerchant.name || 'Unknown Merchant';
@@ -912,7 +912,7 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
           address: walletAddress,
           abi: BeneficiaryWalletABI.abi,
           functionName: 'spend',
-          args: [merchantAddress, amountInWei, categoryIndex, description],
+          args: [merchantAddress, amountInUnits, categoryIndex, description],
           account: address,
         });
         console.log('✅ Gas estimation successful:', gasEstimate);
@@ -939,7 +939,7 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
         address: walletAddress,
         abi: BeneficiaryWalletABI.abi,
         functionName: 'spend',
-        args: [merchantAddress, amountInWei, categoryIndex, description],
+        args: [merchantAddress, amountInUnits, categoryIndex, description],
         account: address,
       });
 
@@ -1018,7 +1018,7 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
         type: 'success',
         message: {
           title: 'Payment Successful!',
-          description: `Paid ${amount} RELIEF to ${merchantName}`,
+          description: `Paid ${amount} USDC to ${merchantName}`,
           txHash: txHash,
         },
         duration: 8000,
@@ -1084,7 +1084,7 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
         {/* Available Balance */}
         <div className="mb-6 p-4 bg-purple-50 rounded-lg">
           <p className="text-sm text-purple-800">
-            Available Balance: <strong>{availableBalance.toFixed(2)} RELIEF</strong>
+            Available Balance: <strong>{availableBalance.toFixed(2)} USDC</strong>
           </p>
         </div>
 
@@ -1168,7 +1168,7 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
             {/* Amount Input */}
             <div className="mb-4">
               <label className="block text-gray-700 font-medium mb-2">
-                Amount (RELIEF Tokens)
+                Amount (USDC)
               </label>
               <input
                 type="number"
@@ -1208,7 +1208,7 @@ function SpendFundsModal({ walletAddress, availableBalance, merchants: merchants
                   Processing...
                 </span>
               ) : (
-                '🛒 Spend RELIEF Tokens'
+                '🛒 Spend USDC'
               )}
             </button>
 
