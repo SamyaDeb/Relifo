@@ -22,6 +22,8 @@ export const POLYGON_AMOY_RPC = 'https://rpc-amoy.polygon.technology';
 
 // Contract addresses
 export const CONTRACTS = {
+  usdc: contractAddresses.contracts.USDC,
+  testnetUsdcSwap: contractAddresses.contracts.TestnetUSDCSwap || contractAddresses.contracts.POLtoUSDCSwap,
   reliefToken: contractAddresses.contracts.ReliefToken,
   reliefTokenSale: contractAddresses.contracts.ReliefTokenSale,
   campaignFactory: contractAddresses.contracts.CampaignFactory,
