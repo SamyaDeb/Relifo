@@ -8,24 +8,27 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title ReliefTokenSale
- * @dev Contract for exchanging POL (MATIC) to RELIEF tokens at 1:1 ratio
- * @notice Donors can buy RELIEF tokens by sending POL to this contract
+ * @dev Contract for exchanging USDC to RELIEF tokens at 1:1 ratio
+ * @notice Donors can buy RELIEF tokens by transferring USDC to this contract
  */
 contract ReliefTokenSale is Ownable, ReentrancyGuard, Pausable {
     
     /// @notice RELIEF token contract
     IERC20 public reliefToken;
     
-    /// @notice Exchange rate: 1 POL = 1 RELIEF (in wei)
-    uint256 public constant EXCHANGE_RATE = 1;
+    /// @notice USDC token contract
+    IERC20 public usdcToken;
     
-    /// @notice Minimum purchase amount (0.01 POL)
-    uint256 public constant MIN_PURCHASE = 0.01 ether;
+    /// @notice Exchange rate: 1 USDC = 1 RELIEF (considering decimals: USDC has 6, RELIEF has 18)
+    uint256 public constant USDC_TO_RELIEF_MULTIPLIER = 10**12; // Convert 6 decimals to 18
     
-    /// @notice Maximum purchase amount per transaction (10,000 POL)
-    uint256 public constant MAX_PURCHASE = 10000 ether;
+    /// @notice Minimum purchase amount (0.01 USDC = 10,000 with 6 decimals)
+    uint256 public constant MIN_PURCHASE = 10000; // 0.01 USDC
     
-    /// @notice Total POL raised
+    /// @notice Maximum purchase amount per transaction (10,000 USDC)
+    uint256 public constant MAX_PURCHASE = 10000 * 10**6; // 10,000 USDC
+    
+    /// @notice Total USDC raised
     uint256 public totalRaised;
     
     /// @notice Total tokens sold
@@ -37,13 +40,13 @@ contract ReliefTokenSale is Ownable, ReentrancyGuard, Pausable {
     /// @notice Event emitted when tokens are purchased
     event TokensPurchased(
         address indexed buyer,
-        uint256 polAmount,
+        uint256 usdcAmount,
         uint256 tokenAmount,
         uint256 timestamp
     );
     
-    /// @notice Event emitted when POL is withdrawn
-    event PolWithdrawn(address indexed owner, uint256 amount);
+    /// @notice Event emitted when USDC is withdrawn
+    event USDCWithdrawn(address indexed owner, uint256 amount);
     
     /// @notice Event emitted when unsold tokens are withdrawn
     event TokensWithdrawn(address indexed owner, uint256 amount);
@@ -51,80 +54,67 @@ contract ReliefTokenSale is Ownable, ReentrancyGuard, Pausable {
     /**
      * @dev Constructor
      * @param _reliefToken Address of RELIEF token contract
+     * @param _usdcToken Address of USDC token contract
      * @param initialOwner Address of the initial owner (super admin)
      */
-    constructor(address _reliefToken, address initialOwner) Ownable(initialOwner) {
-        require(_reliefToken != address(0), "ReliefTokenSale: Invalid token address");
+    constructor(address _reliefToken, address _usdcToken, address initialOwner) Ownable(initialOwner) {
+        require(_reliefToken != address(0), "ReliefTokenSale: Invalid relief token address");
+        require(_usdcToken != address(0), "ReliefTokenSale: Invalid USDC token address");
         reliefToken = IERC20(_reliefToken);
+        usdcToken = IERC20(_usdcToken);
     }
 
     /**
-     * @notice Buy RELIEF tokens with POL
-     * @dev Automatically calculates tokens based on POL sent
+     * @notice Buy RELIEF tokens with USDC
+     * @dev User must approve this contract to spend USDC first
+     * @param usdcAmount Amount of USDC to spend (with 6 decimals)
      */
-    function buyTokens() external payable nonReentrant whenNotPaused {
-        require(msg.value >= MIN_PURCHASE, "ReliefTokenSale: Amount below minimum");
-        require(msg.value <= MAX_PURCHASE, "ReliefTokenSale: Amount exceeds maximum");
+    function buyTokens(uint256 usdcAmount) external nonReentrant whenNotPaused {
+        require(usdcAmount >= MIN_PURCHASE, "ReliefTokenSale: Amount below minimum");
+        require(usdcAmount <= MAX_PURCHASE, "ReliefTokenSale: Amount exceeds maximum");
         
-        uint256 tokenAmount = msg.value * EXCHANGE_RATE;
+        // Calculate RELIEF token amount (convert USDC 6 decimals to RELIEF 18 decimals)
+        uint256 tokenAmount = usdcAmount * USDC_TO_RELIEF_MULTIPLIER;
         
         require(
             reliefToken.balanceOf(address(this)) >= tokenAmount,
             "ReliefTokenSale: Insufficient tokens in contract"
+        );
+        
+        // Transfer USDC from buyer to this contract
+        require(
+            usdcToken.transferFrom(msg.sender, address(this), usdcAmount),
+            "ReliefTokenSale: USDC transfer failed"
         );
         
         // Update state
-        totalRaised += msg.value;
+        totalRaised += usdcAmount;
         totalTokensSold += tokenAmount;
         purchases[msg.sender] += tokenAmount;
         
-        // Transfer tokens to buyer
+        // Transfer RELIEF tokens to buyer
         require(
             reliefToken.transfer(msg.sender, tokenAmount),
             "ReliefTokenSale: Token transfer failed"
         );
         
-        emit TokensPurchased(msg.sender, msg.value, tokenAmount, block.timestamp);
+        emit TokensPurchased(msg.sender, usdcAmount, tokenAmount, block.timestamp);
     }
 
     /**
-     * @notice Receive function to accept POL and buy tokens
-     */
-    receive() external payable {
-        require(msg.value >= MIN_PURCHASE, "ReliefTokenSale: Amount below minimum");
-        require(msg.value <= MAX_PURCHASE, "ReliefTokenSale: Amount exceeds maximum");
-        
-        uint256 tokenAmount = msg.value * EXCHANGE_RATE;
-        
-        require(
-            reliefToken.balanceOf(address(this)) >= tokenAmount,
-            "ReliefTokenSale: Insufficient tokens in contract"
-        );
-        
-        totalRaised += msg.value;
-        totalTokensSold += tokenAmount;
-        purchases[msg.sender] += tokenAmount;
-        
-        require(
-            reliefToken.transfer(msg.sender, tokenAmount),
-            "ReliefTokenSale: Token transfer failed"
-        );
-        
-        emit TokensPurchased(msg.sender, msg.value, tokenAmount, block.timestamp);
-    }
-
-    /**
-     * @notice Withdraw collected POL to owner
+     * @notice Withdraw collected USDC to owner
      * @dev Only owner can withdraw
      */
-    function withdrawPol() external onlyOwner nonReentrant {
-        uint256 balance = address(this).balance;
-        require(balance > 0, "ReliefTokenSale: No POL to withdraw");
+    function withdrawUSDC() external onlyOwner nonReentrant {
+        uint256 balance = usdcToken.balanceOf(address(this));
+        require(balance > 0, "ReliefTokenSale: No USDC to withdraw");
         
-        (bool success, ) = payable(owner()).call{value: balance}("");
-        require(success, "ReliefTokenSale: POL transfer failed");
+        require(
+            usdcToken.transfer(owner(), balance),
+            "ReliefTokenSale: USDC transfer failed"
+        );
         
-        emit PolWithdrawn(owner(), balance);
+        emit USDCWithdrawn(owner(), balance);
     }
 
     /**
@@ -171,12 +161,20 @@ contract ReliefTokenSale is Ownable, ReentrancyGuard, Pausable {
     }
 
     /**
-     * @notice Calculate token amount for given POL amount
-     * @param polAmount Amount of POL
-     * @return Token amount
+     * @notice Calculate token amount for given USDC amount
+     * @param usdcAmount Amount of USDC (with 6 decimals)
+     * @return Token amount (with 18 decimals)
      */
-    function calculateTokenAmount(uint256 polAmount) external pure returns (uint256) {
-        return polAmount * EXCHANGE_RATE;
+    function calculateTokenAmount(uint256 usdcAmount) external pure returns (uint256) {
+        return usdcAmount * USDC_TO_RELIEF_MULTIPLIER;
+    }
+    
+    /**
+     * @notice Get USDC balance of this contract
+     * @return USDC balance
+     */
+    function getUSDCBalance() external view returns (uint256) {
+        return usdcToken.balanceOf(address(this));
     }
 
     /**

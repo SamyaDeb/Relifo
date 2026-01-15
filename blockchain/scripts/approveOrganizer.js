@@ -15,15 +15,15 @@ async function main() {
     process.exit(1);
   }
 
-  console.log("\n🔐 Approving Organizer on Blockchain");
-  console.log("====================================");
+  console.log("\n🔐 Approving Organizer on USDC CampaignFactory");
+  console.log("==============================================");
   console.log(`Organizer Address: ${organizerAddress}`);
 
-  // Get deployed CampaignFactory address
+  // Get deployed CampaignFactory address (NEW USDC-based one)
   const deployments = require("../deployments/amoy.json");
-  const factoryAddress = deployments.contracts.CampaignFactory;
+  const factoryAddress = deployments.contracts.CampaignFactory; // This is the USDC factory now
   
-  console.log(`CampaignFactory: ${factoryAddress}`);
+  console.log(`CampaignFactory (USDC): ${factoryAddress}`);
 
   // Get signer (admin)
   const [admin] = await hre.ethers.getSigners();

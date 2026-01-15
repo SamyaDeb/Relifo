@@ -34,6 +34,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@uniswap/v3-periphery": "^1.4.4",
     "ethers": "^6.16.0"
   }
 }

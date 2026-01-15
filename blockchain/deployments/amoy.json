@@ -2,10 +2,13 @@
   "network": "Polygon Amoy Testnet",
   "chainId": 80002,
   "deployer": "0x74E36d4A7b33057e3928CE4bf4C8C53A93361C34",
-  "timestamp": "2026-01-05T15:21:03.966Z",
+  "timestamp": "2026-01-15T10:56:38.407Z",
+  "tokenUsed": "USDC",
+  "tokenDecimals": 6,
   "contracts": {
-    "ReliefToken": "0xA19dfE0a1fCDf819b073A36875374Db23B12A953",
-    "ReliefTokenSale": "0x875b8CCF98DC19901dC1A61684dAfad3439b8Fa8",
-    "CampaignFactory": "0xB60eAe36f87F16D1BC1A7173F28FAf8061C531DE"
-  }
+    "USDC": "0x8B0180f2101c8260d49339abfEe87927412494B4",
+    "CampaignFactory": "0xb5f9972A84AE63a609f253f4137640406540D9f2",
+    "TestnetUSDCSwap": "0xd102058765F3F3771cb2DDf6C543D0A14B97543E"
+  },
+  "note": "All campaigns accept USDC donations (6 decimals). Campaign.sol reliefToken variable = USDC address."
 }
