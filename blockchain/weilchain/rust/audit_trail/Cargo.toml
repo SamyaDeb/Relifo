@@ -1,0 +1,23 @@
+[package]
+name = "audit_trail"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.98"
+serde = { version = "1.0.219", features = ["derive", "rc"] }
+serde_json = { version = "1.0.140", features = ["raw_value"] }
+
+weil_macros = { path = "/Users/samya/Desktop/Relifo_WeilChain/wadk/adk/rust/weil_rs/weil_macros" }
+weil_rs = { path = "/Users/samya/Desktop/Relifo_WeilChain/wadk/adk/rust/weil_rs" }
+weil_contracts = { path = "/Users/samya/Desktop/Relifo_WeilChain/wadk/adk/rust/weil_rs/weil_contracts" }
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "z"        # Optimize for size (more aggressive than "s")
+lto = true             # Link Time Optimization
+strip = true           # Strip symbols from binary
+codegen-units = 1      # Better optimization
+panic = "abort"        # Smaller panic handler

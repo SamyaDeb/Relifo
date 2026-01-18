@@ -1,0 +1,48 @@
+// Audit Trail Contract for EIBS 2.0 - Relifo
+// Logs all Polygon transactions for cross-chain verification
+
+enum TransactionType {
+    Donation,
+    Allocation,
+    BeneficiarySpending,
+    MerchantPayment,
+    Withdrawal
+}
+
+record AuditEntry {
+    id: string,
+    polygon_tx_hash: string,
+    from_address: string,
+    to_address: string,
+    amount: u64,
+    transaction_type: TransactionType,
+    campaign_id: string,
+    timestamp: u64,
+    block_number: u64,
+    metadata: string
+}
+
+record AuditStats {
+    total_entries: u64,
+    total_donations_logged: u64,
+    total_amount_tracked: u64,
+    last_entry_timestamp: u64
+}
+
+interface AuditTrail {
+    query func get_entry(id: string) -> result<AuditEntry, string>;
+    query func get_entry_by_tx_hash(polygon_tx_hash: string) -> result<AuditEntry, string>;
+    query func get_recent_entries(limit: u64) -> list<AuditEntry>;
+    query func get_stats() -> AuditStats;
+    query func verify_transaction(polygon_tx_hash: string) -> bool;
+    mutate func log_transaction(
+        polygon_tx_hash: string,
+        from_address: string,
+        to_address: string,
+        amount: u64,
+        transaction_type: string,
+        campaign_id: string,
+        block_number: u64,
+        metadata: string
+    ) -> result<string, string>
+}
