@@ -5,6 +5,8 @@ import { collection, query, where, onSnapshot, doc, updateDoc, increment, addDoc
 import { useAccount, useWalletClient, useDisconnect } from 'wagmi';
 import { parseEther, formatEther, parseUnits } from 'viem';
 import polygonService from '../../services/polygonService';
+import WeilChainBadge from '../../components/WeilChainBadge';
+import WeilChainAuditStats from '../../components/WeilChainAuditStats';
 
 export default function DonorDashboard() {
   const [campaigns, setCampaigns] = useState([]);
@@ -352,7 +354,16 @@ export default function DonorDashboard() {
                 ) : (
                   donations.slice(0, 5).map(donation => (
                     <div key={donation.id} className="flex justify-between items-center text-xs border-b border-white/10 pb-1">
-                      <span className="text-white/80 truncate mr-2">{donation.campaignTitle || 'Campaign'}</span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <span className="text-white/80 truncate mr-2">{donation.campaignTitle || 'Campaign'}</span>
+                        {donation.txHash && (
+                          <WeilChainBadge 
+                            polygonTxHash={donation.txHash} 
+                            size="xs"
+                            showDetails={false}
+                          />
+                        )}
+                      </div>
                       <span className="text-green-400 font-semibold whitespace-nowrap">${parseFloat(donation.amount).toFixed(2)} USDC</span>
                     </div>
                   ))
@@ -360,6 +371,11 @@ export default function DonorDashboard() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* WeilChain Audit Trail Stats - Full Width */}
+        <div className="mb-4 flex-shrink-0">
+          <WeilChainAuditStats />
         </div>
 
         {/* Available Campaigns */}
