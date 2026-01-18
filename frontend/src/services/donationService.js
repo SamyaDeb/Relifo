@@ -8,9 +8,11 @@
  * 3. Buy RELIEF tokens with USDC
  * 4. Approve RELIEF for Campaign
  * 5. Donate RELIEF to campaign
+ * 6. Log transaction to WeilChain audit trail
  */
 
 import { ethers } from 'ethers';
+import { logTransactionToWeilChain, TRANSACTION_TYPES } from './weilchainAuditService';
 
 // Contract addresses from env
 const USDC_ADDRESS = import.meta.env.VITE_USDC_ADDRESS;
@@ -182,9 +184,10 @@ export const approveRELIEF = async (provider, campaignAddress, reliefAmount) => 
 /**
  * Donate RELIEF tokens to campaign
  */
-export const donateToCampaign = async (provider, campaignAddress, reliefAmount) => {
+export const donateToCampaign = async (provider, campaignAddress, reliefAmount, campaignMetadata = {}) => {
   try {
     const signer = await provider.getSigner();
+    const userAddress = await signer.getAddress();
     const contract = new ethers.Contract(campaignAddress, CAMPAIGN_ABI, signer);
     
     const reliefAmountWei = ethers.parseEther(reliefAmount.toString());
@@ -193,10 +196,32 @@ export const donateToCampaign = async (provider, campaignAddress, reliefAmount) 
     const tx = await contract.donate(reliefAmountWei);
     console.log('Donation transaction sent:', tx.hash);
     
-    await tx.wait();
+    const receipt = await tx.wait();
     console.log('Donation successful!');
     
-    return { success: true, txHash: tx.hash };
+    // Log to WeilChain audit trail (non-blocking)
+    logTransactionToWeilChain({
+      polygonTxHash: receipt.hash,
+      fromAddress: userAddress,
+      toAddress: campaignAddress,
+      amount: reliefAmountWei.toString(),
+      transactionType: TRANSACTION_TYPES.DONATION,
+      campaignId: campaignMetadata.campaignId || campaignAddress,
+      blockNumber: receipt.blockNumber,
+      metadata: {
+        donor: userAddress,, campaignMetadata = {}
+        campaignTitle: campaignMetadata.title || 'Unknown Campaign',
+        reliefAmount: reliefAmount.toString(),
+        timestamp: new Date().toISOString(),
+        ...campaignMetadata
+      }
+    }).then(() => {
+      console.log('✅ Transaction logged to WeilChain audit trail');
+    }).catch(err => {
+      console.log('⚠️ WeilChain logging failed (non-critical):', err.message);
+    });
+    
+    return { success: true, txHash: receipt.hash, receipt };
   } catch (error) {
     console.error('Error donating to campaign:', error);
     return { success: false, error: error.message };
@@ -252,18 +277,23 @@ export const completeDonationFlow = async (provider, campaignAddress, usdcAmount
     
     // Step 5: Donate RELIEF to campaign
     onProgress?.('Donating to campaign... (sign transaction)', 7);
-    const donationResult = await donateToCampaign(provider, campaignAddress, reliefAmount);
+    const donationResult = await donateToCampaign(provider, campaignAddress, reliefAmount, {
+      ...campaignMetadata,
+      campaignId: campaignAddress,
+      donor: userAddress
+    });
     if (!donationResult.success) {
       throw new Error('Donation failed: ' + donationResult.error);
     }
     
-    onProgress?.('Donation complete!', 8);
+    onProgress?.('Donation complete! Logging to WeilChain...', 8);
     
     return {
       success: true,
       usdcAmount,
       reliefAmount,
-      txHash: donationResult.txHash
+      txHash: donationResult.txHash,
+      receipt: donationResult.receipt
     };
     
   } catch (error) {

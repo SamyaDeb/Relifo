@@ -5,6 +5,7 @@
 
 import { getContract } from 'viem';
 import { polygonAmoy } from 'wagmi/chains';
+import { logTransactionToWeilChain, TRANSACTION_TYPES } from './weilchainAuditService';
 
 // Import contract ABIs
 import ReliefTokenABI from '../contracts/ReliefToken.json';
@@ -426,6 +427,109 @@ export const removeChainChangedListener = (callback) => {
   }
 };
 
+/**
+ * Log fund allocation to WeilChain
+ * Helper function for organizers allocating funds to beneficiaries
+ * 
+ * @param {object} receipt - Transaction receipt
+ * @param {string} fromAddress - Campaign address
+ * @param {string} toAddress - Beneficiary wallet address
+ * @param {string} amount - Amount allocated (in wei/smallest unit)
+ * @param {object} metadata - Additional metadata
+ */
+export const logAllocationToWeilChain = async (receipt, fromAddress, toAddress, amount, metadata = {}) => {
+  try {
+    await logTransactionToWeilChain({
+      polygonTxHash: receipt.transactionHash || receipt.hash,
+      fromAddress,
+      toAddress,
+      amount: amount.toString(),
+      transactionType: TRANSACTION_TYPES.ALLOCATION,
+      campaignId: metadata.campaignId || fromAddress,
+      blockNumber: receipt.blockNumber,
+      metadata: {
+        beneficiary: metadata.beneficiaryName || toAddress,
+        campaignTitle: metadata.campaignTitle || 'Campaign',
+        allocationType: 'fund_allocation',
+        timestamp: new Date().toISOString(),
+        ...metadata
+      }
+    });
+    console.log('✅ Allocation logged to WeilChain');
+  } catch (error) {
+    console.log('⚠️ WeilChain logging failed (non-critical):', error.message);
+  }
+};
+
+/**
+ * Log beneficiary spending to WeilChain
+ * Helper function for beneficiaries spending funds at merchants
+ * 
+ * @param {object} receipt - Transaction receipt
+ * @param {string} fromAddress - Beneficiary wallet address
+ * @param {string} toAddress - Merchant address
+ * @param {string} amount - Amount spent (in wei/smallest unit)
+ * @param {object} metadata - Additional metadata
+ */
+export const logBeneficiarySpendingToWeilChain = async (receipt, fromAddress, toAddress, amount, metadata = {}) => {
+  try {
+    await logTransactionToWeilChain({
+      polygonTxHash: receipt.transactionHash || receipt.hash,
+      fromAddress,
+      toAddress,
+      amount: amount.toString(),
+      transactionType: TRANSACTION_TYPES.BENEFICIARY_SPENDING,
+      campaignId: metadata.campaignId || '',
+      blockNumber: receipt.blockNumber,
+      metadata: {
+        beneficiary: metadata.beneficiaryName || fromAddress,
+        merchant: metadata.merchantName || toAddress,
+        merchantCategory: metadata.merchantCategory || 'general',
+        spendingType: 'beneficiary_spending',
+        timestamp: new Date().toISOString(),
+        ...metadata
+      }
+    });
+    console.log('✅ Beneficiary spending logged to WeilChain');
+  } catch (error) {
+    console.log('⚠️ WeilChain logging failed (non-critical):', error.message);
+  }
+};
+
+/**
+ * Log merchant payment to WeilChain
+ * Helper function for merchant-related payments
+ * 
+ * @param {object} receipt - Transaction receipt
+ * @param {string} fromAddress - Payer address
+ * @param {string} toAddress - Merchant address
+ * @param {string} amount - Amount paid (in wei/smallest unit)
+ * @param {object} metadata - Additional metadata
+ */
+export const logMerchantPaymentToWeilChain = async (receipt, fromAddress, toAddress, amount, metadata = {}) => {
+  try {
+    await logTransactionToWeilChain({
+      polygonTxHash: receipt.transactionHash || receipt.hash,
+      fromAddress,
+      toAddress,
+      amount: amount.toString(),
+      transactionType: TRANSACTION_TYPES.MERCHANT_PAYMENT,
+      campaignId: metadata.campaignId || '',
+      blockNumber: receipt.blockNumber,
+      metadata: {
+        merchant: metadata.merchantName || toAddress,
+        merchantCategory: metadata.merchantCategory || 'general',
+        paymentType: 'merchant_payment',
+        timestamp: new Date().toISOString(),
+        ...metadata
+      }
+    });
+    console.log('✅ Merchant payment logged to WeilChain');
+  } catch (error) {
+    console.log('⚠️ WeilChain logging failed (non-critical):', error.message);
+  }
+};
+
 export default {
   // Wallet functions
   connectWallet,
@@ -458,6 +562,11 @@ export default {
   onChainChanged,
   removeAccountsChangedListener,
   removeChainChangedListener,
+  
+  // WeilChain logging helpers
+  logAllocationToWeilChain,
+  logBeneficiarySpendingToWeilChain,
+  logMerchantPaymentToWeilChain,
   
   // Constants
   CONTRACTS,
