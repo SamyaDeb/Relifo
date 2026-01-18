@@ -498,6 +498,7 @@ export default function AllocateFundsModal({ campaign, beneficiaries, onClose, o
           await updateDoc(beneficiaryRef, {
             allocatedAmount: newAllocated,
             contractWalletAddress: walletAddress,
+            allocationTxHash: txHash,
             updatedAt: new Date().toISOString()
           });
           
