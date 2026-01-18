@@ -9,6 +9,7 @@ import DonorDashboard from './pages/donor/Dashboard';
 import BeneficiaryDashboard from './pages/beneficiary/Dashboard';
 import MerchantDashboard from './pages/merchant/Dashboard';
 import CleanupData from './pages/CleanupData';
+import WeilChainTestPage from './pages/WeilChainTestPage';
 
 function App() {
   return (
@@ -24,6 +25,7 @@ function App() {
         <Route path="/beneficiary/dashboard" element={<BeneficiaryDashboard />} />
         <Route path="/merchant/dashboard" element={<MerchantDashboard />} />
         <Route path="/cleanup" element={<CleanupData />} />
+        <Route path="/weilchain-test" element={<WeilChainTestPage />} />
       </Routes>
     </BrowserRouter>
   );
