@@ -10,6 +10,8 @@ import { CONTRACTS } from '../../services/polygonService';
 import CampaignFactoryABI from '../../contracts/CampaignFactory.json';
 import ReliefTokenABI from '../../contracts/ReliefToken.json';
 import { useNotification } from '../../contexts/NotificationContext';
+import WeilChainBadge from '../../components/WeilChainBadge';
+import WeilChainAuditStats from '../../components/WeilChainAuditStats';
 
 export default function MerchantDashboard() {
   const { address } = useAccount();
@@ -365,6 +367,11 @@ export default function MerchantDashboard() {
           ))}
         </div>
 
+        {/* WeilChain Audit Trail Stats */}
+        <div className="mb-4 flex-shrink-0">
+          <WeilChainAuditStats />
+        </div>
+
         {/* Tabs */}
         <div className="glass-card border border-white/20 rounded-3xl backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all flex-1 overflow-hidden flex flex-col">
           <div className="flex border-b border-white/10 flex-shrink-0">
@@ -465,6 +472,7 @@ export default function MerchantDashboard() {
                           <th className="text-left py-3 px-4 font-semibold text-white/70">Customer</th>
                           <th className="text-left py-3 px-4 font-semibold text-white/70">Amount</th>
                           <th className="text-left py-3 px-4 font-semibold text-white/70">Status</th>
+                          <th className="text-left py-3 px-4 font-semibold text-white/70">Verified</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -486,6 +494,9 @@ export default function MerchantDashboard() {
                               }`}>
                                 {tx.status}
                               </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              {tx.txHash && <WeilChainBadge polygonTxHash={tx.txHash} size="sm" />}
                             </td>
                           </tr>
                         ))}
