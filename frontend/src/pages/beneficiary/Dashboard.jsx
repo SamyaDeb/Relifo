@@ -14,6 +14,9 @@ import MerchantRegistryABI from '../../contracts/MerchantRegistry.json';
 import { CONTRACTS, getPolygonScanUrl, parseContractError } from '../../services/polygonService';
 import { useNotification } from '../../contexts/NotificationContext';
 import TransactionReceipt from '../../components/TransactionReceipt';
+import WeilChainBadge from '../../components/WeilChainBadge';
+import WeilChainAuditStats from '../../components/WeilChainAuditStats';
+import { logTransactionToWeilChain } from '../../services/weilchainAuditService';
 
 export default function BeneficiaryDashboard() {
   const [contractWalletAddress, setContractWalletAddress] = useState(null);
@@ -402,6 +405,21 @@ export default function BeneficiaryDashboard() {
 
       console.log('📝 Transaction recorded in database');
 
+      // Step 5: Log to WeilChain audit trail (non-blocking)
+      try {
+        await logTransactionToWeilChain(hash, 'BeneficiarySpending', parseFloat(amount), {
+          beneficiaryAddress: address,
+          merchantAddress: merchant.address,
+          merchantName: merchant.name,
+          campaignId: campaign?.id || 'unknown',
+          campaignTitle: campaign?.title || 'Unknown Campaign',
+        });
+        console.log('✅ Spending logged to WeilChain');
+      } catch (weilError) {
+        console.error('⚠️ WeilChain logging failed (non-critical):', weilError);
+        // Don't throw - spending succeeded, this is just audit trail
+      }
+
       // Refresh balance
       await loadWalletBalance(contractWalletAddress);
 
@@ -630,6 +648,11 @@ export default function BeneficiaryDashboard() {
               </div>
             )}
 
+            {/* WeilChain Audit Trail Stats */}
+            <div className="mb-4 flex-shrink-0">
+              <WeilChainAuditStats />
+            </div>
+
             {/* Action Button */}
             <div className="glass-card border border-white/20 rounded-3xl p-5 backdrop-blur-md bg-white/5 hover:bg-white/10 transition-all mb-4 flex-shrink-0">
               <button
@@ -661,7 +684,10 @@ export default function BeneficiaryDashboard() {
                           <p className="text-white font-semibold">{tx.merchantName}</p>
                           <p className="text-xs text-white/50">{new Date(tx.createdAt).toLocaleString()}</p>
                         </div>
-                        <span className="text-red-400 font-bold text-lg">-{parseFloat(tx.amount).toFixed(2)} USDC</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-red-400 font-bold text-lg">-{parseFloat(tx.amount).toFixed(2)} USDC</span>
+                          {tx.txHash && <WeilChainBadge polygonTxHash={tx.txHash} size="sm" />}
+                        </div>
                       </div>
                       <div className="flex items-center justify-between text-xs">
                         <span className="text-white/70">{tx.category}</span>
