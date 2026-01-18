@@ -12,6 +12,8 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import AllocateFundsModal from '../../components/AllocateFundsModal';
 import CampaignFactoryABI from '../../contracts/CampaignFactory.json';
 import CampaignABI from '../../contracts/Campaign.json';
+import WeilChainBadge from '../../components/WeilChainBadge';
+import WeilChainAuditStats from '../../components/WeilChainAuditStats';
 
 export default function OrganizerDashboard() {
   const { address, isConnected } = useAccount();
@@ -519,6 +521,11 @@ export default function OrganizerDashboard() {
           </div>
         </div>
 
+        {/* WeilChain Audit Trail Stats */}
+        <div className="mb-4 flex-shrink-0">
+          <WeilChainAuditStats />
+        </div>
+
         {/* Tabs Section */}
         <div className="glass-card border border-white/20 rounded-3xl backdrop-blur-md bg-white/5 flex-1 flex flex-col min-h-0 overflow-hidden">
           {/* Tab Headers */}
@@ -791,14 +798,17 @@ function CampaignCard({ campaign, approvedBeneficiaries = [], onAllocateFunds })
             💰 Allocate Funds
           </button>
           {campaign.txHash && (
-            <a
-              href={getPolygonScanUrl(campaign.txHash)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-1 bg-white/10 text-white py-2 rounded-lg hover:bg-white/20 font-semibold text-center border border-white/20"
-            >
-              View on PolygonScan ↗
-            </a>
+            <div className="flex-1 flex gap-2 items-center">
+              <a
+                href={getPolygonScanUrl(campaign.txHash)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 bg-white/10 text-white py-2 rounded-lg hover:bg-white/20 font-semibold text-center border border-white/20"
+              >
+                View on PolygonScan ↗
+              </a>
+              <WeilChainBadge polygonTxHash={campaign.txHash} size="md" />
+            </div>
           )}
         </div>
       </div>
@@ -1472,6 +1482,9 @@ function ApprovedBeneficiaryCard({ beneficiary, campaign, onAllocateFunds }) {
             <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-green-500/20 text-green-300 border border-green-500/30">
               ✅ APPROVED ON-CHAIN
             </span>
+            {beneficiary.approvalTxHash && (
+              <WeilChainBadge polygonTxHash={beneficiary.approvalTxHash} size="sm" />
+            )}
             {beneficiary.hasWallet ? (
               <span className="px-4 py-1.5 rounded-full text-sm font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
                 💰 ${beneficiary.allocatedAmount || '0'} USDC ALLOCATED
@@ -1515,7 +1528,12 @@ function ApprovedBeneficiaryCard({ beneficiary, campaign, onAllocateFunds }) {
         {/* Beneficiary Wallet Contract (if exists) */}
         {beneficiary.hasWallet && beneficiary.walletContract && (
           <div className="bg-green-500/10 rounded-lg p-3 border border-green-500/30 mt-4">
-            <span className="text-xs font-semibold text-green-300 uppercase block mb-1">Beneficiary Wallet Contract</span>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-green-300 uppercase">Beneficiary Wallet Contract</span>
+              {beneficiary.allocationTxHash && (
+                <WeilChainBadge polygonTxHash={beneficiary.allocationTxHash} size="sm" />
+              )}
+            </div>
             <p className="text-green-400 font-mono text-sm break-all">{beneficiary.walletContract}</p>
             <p className="text-green-300 text-sm mt-2">
               <strong>Allocated:</strong> ${beneficiary.allocatedAmount} USDC
