@@ -1,5 +1,8 @@
 # 🌍 Relifo - Emergency & Disaster Relief Platform
 
+<img width="1456" height="799" alt="Relifo" src="https://github.com/user-attachments/assets/6cc6e59d-20de-488d-8461-0990848b64ca" />
+
+
 [![Blockchain](https://img.shields.io/badge/Blockchain-Polygon-8247E5)](https://polygon.technology/)
 [![Audit Trail](https://img.shields.io/badge/Audit-WeilChain-00D9FF)](https://www.unweil.me/)
 [![Smart Contracts](https://img.shields.io/badge/Smart%20Contracts-Solidity-363636)](https://soliditylang.org/)
